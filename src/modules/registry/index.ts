@@ -194,7 +194,8 @@ export function createRegistryModule(db: AppDatabase, stores: StoreModule, strat
           const bill: SettlementBill = {
             id: orderSlip.id, orderSlipId: orderSlip.id, storeId: orderSlip.storeId, clientId: orderSlip.clientId,
             managerId, date: orderSlip.date, ...result,
-            clientNetGain: monetaryValue(toMinorUnits(result.netGain) - toMinorUnits(result.performanceFee)),
+            // 客户实得 = 中奖奖金 − 佣金（佣金按奖金 20% 计，见 settlement 模块）
+            clientNetGain: monetaryValue(toMinorUnits(result.grossGain) - toMinorUnits(result.performanceFee)),
           };
           db.insert('bill', bill.id, bill);
           return bill;

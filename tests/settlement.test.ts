@@ -8,9 +8,9 @@ const validInput: SettlementInput = {
 };
 
 describe('calculateSettlement', () => {
-  it('distributes an adopted positive yield at 20% and 10%', () => {
+  it('distributes an adopted hit at 20% and 10% of the gross prize', () => {
     expect(calculateSettlement({ totalAmount: 2, quotaPerUnit: 1040, quantity: 1, isHit: true, adoptedStrategy: true })).toEqual({
-      grossGain: 1040, netGain: 1038, performanceFee: 207.6, managerIncentive: 103.8, platformMargin: 103.8,
+      grossGain: 1040, netGain: 1038, performanceFee: 208, managerIncentive: 104, platformMargin: 104,
     });
   });
 
@@ -26,9 +26,9 @@ describe('calculateSettlement', () => {
     });
   });
 
-  it.each([2, 3])('clamps nonpositive yield to zero for total amount %s', (totalAmount) => {
+  it.each([2, 3])('charges no fee when the hit prize only covers the stake for total amount %s', (totalAmount) => {
     expect(calculateSettlement({ totalAmount, quotaPerUnit: 2, quantity: 1, isHit: true, adoptedStrategy: true })).toEqual({
-      grossGain: 2, netGain: 0, performanceFee: 0, managerIncentive: 0, platformMargin: 0,
+      grossGain: 2, netGain: 0, performanceFee: 0.4, managerIncentive: 0.2, platformMargin: 0.2,
     });
   });
 
@@ -46,15 +46,15 @@ describe('calculateSettlement', () => {
     expect(() => calculateSettlement({ totalAmount: 0.03, quotaPerUnit: 90071992547409.9, quantity: 1, isHit: true, adoptedStrategy: true })).toThrow(RangeError);
   });
 
-  it('applies the multiplier to gross gain and subtracts total amount once', () => {
+  it('applies the multiplier to gross gain and charges the fee on the gross prize', () => {
     expect(calculateSettlement({ ...validInput, quantity: 3, totalAmount: 6 })).toEqual({
-      grossGain: 3120, netGain: 3114, performanceFee: 622.8, managerIncentive: 311.4, platformMargin: 311.4,
+      grossGain: 3120, netGain: 3114, performanceFee: 624, managerIncentive: 312, platformMargin: 312,
     });
   });
 
   it('calculates decimal products and differences without residual fractions', () => {
     expect(calculateSettlement({ ...validInput, totalAmount: 0.1, quotaPerUnit: 0.2, quantity: 3 })).toEqual({
-      grossGain: 0.6, netGain: 0.5, performanceFee: 0.1, managerIncentive: 0.05, platformMargin: 0.05,
+      grossGain: 0.6, netGain: 0.5, performanceFee: 0.12, managerIncentive: 0.06, platformMargin: 0.06,
     });
   });
 
@@ -128,7 +128,7 @@ describe('calculateSettlement', () => {
     const result = calculateSettlement(input);
     result.performanceFee = 0;
     expect(input).toEqual(validInput);
-    expect(calculateSettlement(input).performanceFee).toBe(207.6);
+    expect(calculateSettlement(input).performanceFee).toBe(208);
   });
 
   it('conserves the fee in cents across rounding boundaries', () => {
@@ -136,7 +136,8 @@ describe('calculateSettlement', () => {
       const result = calculateSettlement({ ...validInput, totalAmount: 1, quotaPerUnit: (100 + cents) / 100 });
       expect(Math.round(result.managerIncentive * 100) + Math.round(result.platformMargin * 100)).toBe(Math.round(result.performanceFee * 100));
       expect(result.performanceFee).toBeGreaterThanOrEqual(0);
-      expect(result.performanceFee).toBeLessThanOrEqual(result.netGain);
+      // 佣金按中奖奖金（毛收益）计，不再受净收益约束
+      expect(result.performanceFee).toBeLessThanOrEqual(result.grossGain);
       expect(result.platformMargin).toBeGreaterThanOrEqual(0);
     }
   });

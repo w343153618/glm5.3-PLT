@@ -70,7 +70,7 @@ describe('Registry module', () => {
     expect(result.bills.find((bill) => bill.orderSlipId === f.input.id)).toEqual({
       id: f.input.id, orderSlipId: f.input.id, storeId: f.store.id, clientId: f.client.id,
       managerId: f.manager.id, date: f.input.date,
-      grossGain: 1040, netGain: 1038, performanceFee: 0, managerIncentive: 0, platformMargin: 0, clientNetGain: 1038,
+      grossGain: 1040, netGain: 1038, performanceFee: 0, managerIncentive: 0, platformMargin: 0, clientNetGain: 1040,
     });
     expect(result.bills.find((bill) => bill.orderSlipId === miss.id)?.grossGain).toBe(0);
     expect(f.registry.listBills(f.store.id)).toEqual(result.bills);
@@ -104,9 +104,9 @@ describe('Registry module', () => {
     expect(f.registry.recordResolution({ date: f.input.date, settlementCode: '038', quotaPerUnit: 0.36 }).bills).toHaveLength(3);
     expect(f.registry.summarize(f.store.id)).toEqual({
       storeId: f.store.id, orderCount: 3, settledCount: 2, totalAmount: 0.12,
-      grossGain: 0.72, netGain: 0.7, performanceFee: 0.14, managerIncentive: 0.08, platformMargin: 0.06, clientNetGain: 0.56,
+      grossGain: 0.72, netGain: 0.7, performanceFee: 0.14, managerIncentive: 0.08, platformMargin: 0.06, clientNetGain: 0.58,
     });
-    expect(f.registry.summarize(other.id).clientNetGain).toBe(0.35);
+    expect(f.registry.summarize(other.id).clientNetGain).toBe(0.36);
     expect(f.registry.listOrders(other.id)).toHaveLength(1);
     expect(f.registry.listBills(other.id)).toHaveLength(1);
   });

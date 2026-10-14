@@ -25,10 +25,12 @@ export function calculateSettlement(input: SettlementInput): SettlementResult {
   const netMinor = difference > 0n ? difference : 0n;
   const grossGain = fromMinorUnits(grossMinor);
   const netGain = fromMinorUnits(netMinor);
-  if (!parsed.adoptedStrategy || netMinor === 0n) {
+  if (!parsed.adoptedStrategy || grossMinor === 0n) {
     return { grossGain, netGain, performanceFee: 0, managerIncentive: 0, platformMargin: 0 };
   }
-  const feeMinor = (netMinor * 20n + 50n) / 100n;
-  const managerMinor = (netMinor * 10n + 50n) / 100n;
+  // 佣金口径（2026-10 与业主确认）：不中奖不收费；中奖按【中奖奖金（毛收益）】的 20% 记佣金，
+  // 其中 10% 归属店长，剩余 10% 为平台份额。与旧版"净收益 20%"口径不同，勿改回。
+  const feeMinor = (grossMinor * 20n + 50n) / 100n;
+  const managerMinor = (grossMinor * 10n + 50n) / 100n;
   return { grossGain, netGain, performanceFee: fromMinorUnits(feeMinor), managerIncentive: fromMinorUnits(managerMinor), platformMargin: fromMinorUnits(feeMinor - managerMinor) };
 }

@@ -55,7 +55,7 @@ describe('HTTP application', () => {
       expect(resolution.statusCode).toBe(200);
       const bills = (await hq.inject(`/api/stores/${manager.storeId}/bills`)).json();
       expect(bills.find((bill: { orderSlipId: string }) => bill.orderSlipId === order.id)).toMatchObject({
-        grossGain: 2080, netGain: 2076, performanceFee: 415.2, managerIncentive: 207.6, platformMargin: 207.6, clientNetGain: 1660.8,
+        grossGain: 2080, netGain: 2076, performanceFee: 416, managerIncentive: 208, platformMargin: 208, clientNetGain: 1664,
       });
       const before = (await hq.inject(`/api/stores/${manager.storeId}/summary`)).json();
       expect((await hq.inject({ method: 'POST', url: '/api/resolutions', payload: event })).statusCode).toBe(200);
@@ -277,8 +277,9 @@ describe('HTTP application', () => {
       const group6Bill = storeBills.find((b: { orderSlipId: string }) => b.orderSlipId === group6Order.id);
       expect(group6Bill).toBeDefined();
       // Hit quota for 组选六 is 173; net gain is 173 - 2 = 171.
-      // Since adoptedStrategy is false (custom pick), no service fee is charged, client keeps 100% of net gain: 171
-      expect(group6Bill.clientNetGain).toBe(171);
+      // Since adoptedStrategy is false (custom pick), no service fee is charged;
+      // clientNetGain = grossGain - performanceFee = 173 - 0 = 173
+      expect(group6Bill.clientNetGain).toBe(173);
 
       // Direct order 123 vs 321 did not hit, so grossGain and clientNetGain are 0
       const directBill = storeBills.find((b: { orderSlipId: string }) => b.orderSlipId === directOrder.id);
