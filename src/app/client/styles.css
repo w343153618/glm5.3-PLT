@@ -217,3 +217,19 @@
 .hot-bar i{display:block;height:100%;background:#176458}
 .sumspan-grid{display:flex;flex-wrap:wrap;gap:4px 8px;margin-top:6px}
 .sumspan-cell{font-size:.75rem;color:var(--muted);border:1px solid var(--line);border-radius:6px;padding:1px 6px}
+
+/* ---- wechat-bind：微信绑定与复制 ---- */
+.wechat-bind-box{background:var(--paper);border:1px solid var(--line);border-radius:var(--radius);
+  padding:14px 18px;margin-bottom:22px;display:flex;flex-direction:column;gap:10px}
+.wechat-bind-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap;font-size:.9rem}
+.wechat-bind-label{min-width:64px;color:var(--muted)}
+.wechat-copy{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line);border-radius:8px;
+  background:rgba(23,100,88,.06);padding:4px 10px;cursor:pointer;color:#176458;font-size:.88rem}
+.wechat-copy small{color:var(--muted);font-size:.72rem}
+.wechat-bind-form{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:0}
+.wechat-bind-form input{width:200px;max-width:60vw;padding:6px 10px;border:1px solid var(--line);border-radius:8px}
+.wechat-bind-form button{padding:6px 14px}
+.wechat-bind-form.manager-wechat{flex-direction:column;align-items:stretch;gap:8px}
+.wechat-bind-form.manager-wechat h2{margin:0 0 2px;font-size:1rem;color:#176458}
+.wechat-bind-form.manager-wechat input{width:100%}
+.wechat-toast{color:#176458;font-size:.8rem}

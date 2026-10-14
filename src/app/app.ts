@@ -9,7 +9,7 @@ import { z, ZodError } from 'zod';
 import { createDatabase } from '../shared/database.ts';
 import { DomainError } from '../shared/errors.ts';
 import { BetModeSchema, OrderCodeSchema, OrderSlipSchema, StrategyPortfolioSchema } from '../shared/schemas/index.ts';
-import { StoreSchema, StoreManagerSchema, ClientSchema } from '../shared/schemas/store.ts';
+import { StoreSchema, StoreManagerSchema, ClientSchema, WechatSchema } from '../shared/schemas/store.ts';
 import { createStoreModule } from '../modules/store/index.ts';
 import { createStrategyModule } from '../modules/strategy/index.ts';
 import { createDrawStatsModule } from '../modules/draw-stats/index.ts';
@@ -60,6 +60,9 @@ const rolePolicies = new Map<string, readonly Actor['role'][]>([
   ['GET /api/lucky-codes', ['client']],
   ['POST /api/lucky-codes', ['client']],
   ['DELETE /api/lucky-codes/:code', ['client']],
+  ['GET /api/wechat/me', ['client', 'manager']],
+  ['PUT /api/wechat/me', ['client', 'manager']],
+  ['GET /api/wechat/manager', ['client']],
 ]);
 const publicRoutes = new Set(['GET /api/health', 'POST /api/auth/login', 'POST /api/auth/logout', 'POST /api/auth/register', 'GET /api/referrals/code/:code']);
 
@@ -236,6 +239,38 @@ export async function buildApp(options: AppOptions = {}) {
     if (actor.role !== 'client' || !actor.clientId) throw new DomainError('仅客户可删除幸运号', 403);
     lucky.remove(actor.clientId, (request.params as { code: string }).code);
     return { ok: true };
+  });
+
+  // wechat-bind：本人微信号绑定/解绑（client/manager 通用，角色自适应）
+  app.get('/api/wechat/me', async (request) => {
+    const actor = access.actor(request);
+    if (actor.role === 'client' && actor.clientId) {
+      return { wechat: stores.getClient(actor.clientId)?.wechat ?? null };
+    }
+    if (actor.role === 'manager' && actor.managerId) {
+      return { wechat: stores.getManager(actor.managerId)?.wechat ?? null };
+    }
+    throw new DomainError('仅客户或店长可查看微信绑定', 403);
+  });
+  app.put('/api/wechat/me', async (request) => {
+    const actor = access.actor(request);
+    const raw = String((request.body as { wechat?: unknown } | undefined)?.wechat ?? '').trim();
+    const wechat = raw === '' ? undefined : WechatSchema.parse(raw);
+    if (actor.role === 'client' && actor.clientId) {
+      return { wechat: stores.setClientWechat(actor.clientId, wechat).wechat ?? null };
+    }
+    if (actor.role === 'manager' && actor.managerId) {
+      return { wechat: stores.setManagerWechat(actor.managerId, wechat).wechat ?? null };
+    }
+    throw new DomainError('仅客户或店长可绑定微信', 403);
+  });
+  // wechat-bind：客户查看所属店长微信（须已归属）
+  app.get('/api/wechat/manager', async (request) => {
+    const actor = access.actor(request);
+    if (actor.role !== 'client' || !actor.managerId) throw new DomainError('账号尚未归属店长，无法查看店长微信', 403);
+    const manager = stores.getManager(actor.managerId);
+    if (!manager) throw new DomainError('未找到店长档案', 404);
+    return { wechat: manager.wechat ?? null, managerName: manager.name };
   });
 
   app.get('/api/referrals/me', async (request) => {

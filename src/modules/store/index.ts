@@ -163,6 +163,21 @@ export function createStoreModule(db: AppDatabase) {
       return db.list('client').map((item) => ClientSchema.parse(item))
         .filter((client) => client.storeId === storeId);
     },
+    /** wechat-bind：更新本人微信号（undefined = 解绑）。档案主体字段，不写审计 journal。 */
+    setClientWechat(clientId: string, wechat: string | undefined): Client {
+      const client = db.get('client', clientId);
+      if (client === undefined) throw new DomainError('未找到该客户档案', 404);
+      const updated = ClientSchema.parse({ ...ClientSchema.parse(client), ...(wechat === undefined ? { wechat: undefined } : { wechat }) });
+      db.set('client', clientId, updated);
+      return updated;
+    },
+    setManagerWechat(managerId: string, wechat: string | undefined): StoreManager {
+      const manager = db.get('manager', managerId);
+      if (manager === undefined) throw new DomainError('未找到该店长档案', 404);
+      const updated = StoreManagerSchema.parse({ ...StoreManagerSchema.parse(manager), ...(wechat === undefined ? { wechat: undefined } : { wechat }) });
+      db.set('manager', managerId, updated);
+      return updated;
+    },
   };
 }
 

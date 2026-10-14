@@ -338,6 +338,8 @@ createApp({
       stopWatermark();
       // pick-assist：清理客户侧辅助数据与倒计时定时器
       recentStale = false; recentDraws.value = []; luckyList.value = [];
+      wechatForm.input = ''; wechatForm.saved = null; wechatForm.managerWechat = null; wechatForm.managerName = ''; wechatForm.busy = false; wechatForm.toast = '';
+      clearTimeout(wechatToastTimer);
       nextDraw.time = null; nextDraw.countdown = '';
       clearInterval(countdownTimer); countdownTimer = null;
       trendsPanel.visible = false; trendsPanel.data = null; trendsPanel.error = ''; trendsPanel.loading = false;
@@ -411,6 +413,7 @@ createApp({
           client.value = values[0]; clients.value = [values[0]]; orders.value = newest(values[1]); ledger.value = latestLedger(values[2]);
           // pick-assist：客户登录后并行加载幸运号 / 近期开奖 / 下期开奖时间（失败静默，不影响主数据）
           loadLuckyCodes().catch(() => {});
+          loadWechat().catch(() => {});
           loadRecentDraws().catch(() => {});
           startCountdown().catch(() => {});
         } else if (current.role === 'manager') {
@@ -418,6 +421,7 @@ createApp({
           if (request !== scopeRequest) return;
           [clients.value, orders.value, bills.value, summary.value, ledger.value] = values;
           orders.value = newest(orders.value); bills.value = [...bills.value].sort((a, b) => b.date.localeCompare(a.date)); ledger.value = latestLedger(ledger.value);
+          loadWechat().catch(() => {});
         } else {
           const query = hqDate.value ? `?date=${encodeURIComponent(hqDate.value)}` : '';
           const [attribution, entries, hqOrders, referralStatsRows] = await Promise.all([
@@ -945,6 +949,46 @@ createApp({
         if (!recentStale) recentDraws.value = result?.draws ?? [];
       } catch { /* 静默：重号提示非关键功能 */ }
     }
+
+    // ---- wechat-bind：本人微信号绑定 + 店长微信展示 ----
+    const wechatForm = reactive({ input: '', saved: null, managerWechat: null, managerName: '', busy: false, toast: '' });
+    let wechatToastTimer;
+    async function loadWechat() {
+      if (role.value !== 'client' && role.value !== 'manager') return;
+      wechatForm.saved = null; wechatForm.managerWechat = null; wechatForm.managerName = '';
+      try {
+        const mine = await api('/api/wechat/me', undefined, 'GET');
+        wechatForm.saved = mine?.wechat ?? null;
+        wechatForm.input = mine?.wechat ?? '';
+        if (role.value === 'client') {
+          const manager = await api('/api/wechat/manager', undefined, 'GET');
+          wechatForm.managerWechat = manager?.wechat ?? null;
+          wechatForm.managerName = manager?.managerName ?? '';
+        }
+      } catch { /* 静默：微信绑定非关键路径 */ }
+    }
+    async function saveWechat() {
+      wechatForm.busy = true; wechatForm.toast = '';
+      try {
+        const result = await api('/api/wechat/me', { wechat: wechatForm.input.trim() }, 'PUT');
+        wechatForm.saved = result?.wechat ?? null;
+        wechatForm.toast = result?.wechat ? '微信号已保存' : '已解除绑定';
+        clearTimeout(wechatToastTimer);
+        wechatToastTimer = setTimeout(() => { wechatForm.toast = ''; }, 4000);
+      } catch (failure) {
+        formError.value = failure.message || '微信绑定失败，请稍后重试。';
+      } finally { wechatForm.busy = false; }
+    }
+    async function copyWechat(value) {
+      if (!value) return;
+      try {
+        await navigator.clipboard.writeText(value);
+        notify(`已复制微信号：${value}`);
+      } catch {
+        // 剪贴板不可用（如非安全上下文降级）时退化为提示
+        notify(`微信号：${value}（请手动复制）`);
+      }
+    }
     function submitCustomOrder() {
       return perform('custom-order', async () => {
         if (customQuantity.value === 0) {
@@ -1143,6 +1187,6 @@ createApp({
       }
       initialize();
     });
-    return { view, bootstrap, session, authChecking, authBusy, authError, logoutUnconfirmed, loginForm, registerForm, registerMode, referral, referralError, referralToast, qrCanvas, photoDialog, photoFileInput, photoViewing, watermarked, role, roleTitle, roleLabel, manager, store, client, ownClients, portfolio, calendar, clients, orders, bills, ledger, audits, attributionSummary, attributionTotals, referralStats, summary, storedCount, loading, scopeLoading, error, scopeError, formError, failedForm, pending, toast, day, dayDialog, orderDialog, followDialog, customDialog, codeHistoryDialog, portfolioDialog, followForm, followTotalCost, customForm, customQuantity, customSelectedCode, customTotalCost, customGroupType, customFormCard, recentRepeatHint, recentDraws, pickFilters, pickFilterMsg, smartRandomCode, luckyList, luckyBusy, saveLuckyCode, removeLuckyCode, fillFromLucky, trendsPanel, toggleTrendsPanel, switchTrendsWindow, codeHistoryView, lookupCodeHistory, nextDraw, toggleBall, selectAllBalls, clearBalls, setCustomMode, formatOrderCode, orderModeTag, isEditingPortfolio, orderForm, adjustmentForm, adjustmentUnconfirmed, adjustmentClient, adjustmentBalance, adjustmentInvalid, startAdjustment, resultForm, portfolioForm, storeForm, managerForm, clientForm, management, hqDate, title, hitCount, verifiedCount, calendarPadding, billMap, money, shortDate, dateTime, clientName, managerName, storeName, statusLabel, voucherLabel, syncing, syncMsg, syncOfficialLottery, initialize, login, register, copyReferralLink, recordReferralShare, photoUrl, pickPhoto, onPhotoPicked, openPhoto, logout, loadScope, loadGlobal, openDay, openOrder, openFollow, submitFollowOrder, openCustomOrder, randomCustomCode, submitCustomOrder, getOrderResolution, openPortfolioDialog, editPortfolioToday, savePortfolioModal, openManagement, closeOrder, saveOrder, claimVoucher, saveAdjustment, saveResolution, savePortfolio, saveStore, saveManager, saveClient, switchView, syncHash };
+    return { view, bootstrap, session, authChecking, authBusy, authError, logoutUnconfirmed, loginForm, registerForm, registerMode, referral, referralError, referralToast, qrCanvas, photoDialog, photoFileInput, photoViewing, watermarked, role, roleTitle, roleLabel, manager, store, client, ownClients, portfolio, calendar, clients, orders, bills, ledger, audits, attributionSummary, attributionTotals, referralStats, summary, storedCount, loading, scopeLoading, error, scopeError, formError, failedForm, pending, toast, day, dayDialog, orderDialog, followDialog, customDialog, codeHistoryDialog, portfolioDialog, followForm, followTotalCost, customForm, customQuantity, customSelectedCode, customTotalCost, customGroupType, customFormCard, recentRepeatHint, recentDraws, pickFilters, wechatForm, loadWechat, saveWechat, copyWechat, pickFilterMsg, smartRandomCode, luckyList, luckyBusy, saveLuckyCode, removeLuckyCode, fillFromLucky, trendsPanel, toggleTrendsPanel, switchTrendsWindow, codeHistoryView, lookupCodeHistory, nextDraw, toggleBall, selectAllBalls, clearBalls, setCustomMode, formatOrderCode, orderModeTag, isEditingPortfolio, orderForm, adjustmentForm, adjustmentUnconfirmed, adjustmentClient, adjustmentBalance, adjustmentInvalid, startAdjustment, resultForm, portfolioForm, storeForm, managerForm, clientForm, management, hqDate, title, hitCount, verifiedCount, calendarPadding, billMap, money, shortDate, dateTime, clientName, managerName, storeName, statusLabel, voucherLabel, syncing, syncMsg, syncOfficialLottery, initialize, login, register, copyReferralLink, recordReferralShare, photoUrl, pickPhoto, onPhotoPicked, openPhoto, logout, loadScope, loadGlobal, openDay, openOrder, openFollow, submitFollowOrder, openCustomOrder, randomCustomCode, submitCustomOrder, getOrderResolution, openPortfolioDialog, editPortfolioToday, savePortfolioModal, openManagement, closeOrder, saveOrder, claimVoucher, saveAdjustment, saveResolution, savePortfolio, saveStore, saveManager, saveClient, switchView, syncHash };
   },
 }).mount('#app');
