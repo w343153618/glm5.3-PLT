@@ -175,3 +175,10 @@
 .qr-wrap canvas{max-width:100%;height:auto;image-rendering:pixelated}
 .qr-link{word-break:break-all;margin:12px 0 16px}
 .qr-link code{background:var(--green-soft,#e5efeb);color:var(--green);padding:6px 10px;border-radius:6px;font-size:.85rem}
+
+/* ---- 页面水印（watermark 模块）：全局层 + 弹窗层共用 --watermark-image ---- */
+#app[watermarked]::after{content:'';position:fixed;inset:0;z-index:9990;pointer-events:none;
+  background-image:var(--watermark-image);background-repeat:repeat}
+.drawer-content{position:relative}
+#app[watermarked] .drawer-content::after{content:'';position:absolute;inset:0;z-index:5;pointer-events:none;
+  background-image:var(--watermark-image);background-repeat:repeat;opacity:0.92}

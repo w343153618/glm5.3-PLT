@@ -12,6 +12,7 @@ interface State {
   session: Ref<{ role: string } | null>;
   authChecking: Ref<boolean>; authError: Ref<string>;
   loginForm: { username: string; password: string };
+  watermarked: Ref<boolean>;
   clients: Ref<Client[]>; client: Ref<Client | null>;
   orders: Ref<unknown[]>; ledger: Ref<unknown[]>;
   pending: Ref<string>;
@@ -24,7 +25,7 @@ interface State {
 }
 const source = readFileSync(new URL('../src/app/client/app.js', import.meta.url), 'utf8').replace(/^import[^\n]*\n/gm, '');
 const page = readFileSync(new URL('../src/app/client/index.html', import.meta.url), 'utf8');
-const template = page.match(/<div id="app" v-cloak>([\s\S]*)<\/div>\s*<noscript>/)![1]!;
+const template = page.match(/<div id="app"[^>]*>([\s\S]*)<\/div>\s*<noscript>/)![1]!;
 const password = 'ui-test-password-42';
 const applications: Awaited<ReturnType<typeof buildApp>>[] = [];
 afterEach(async () => { await Promise.all(applications.splice(0).map(app => app.close())); });
@@ -35,8 +36,12 @@ function clientState(fetcher: (path: string, options?: RequestInit) => Promise<R
     createApp: (component: { setup(): State }) => ({ mount: () => { state = component.setup(); } }),
     ref, reactive, computed, nextTick, onMounted: () => {},
     fetch: fetcher, crypto: { randomUUID },
-    setTimeout: () => 0, clearTimeout: () => {},
-    document: { getElementById: () => null, querySelector: () => null },
+    setTimeout: () => 0, clearTimeout: () => {}, setInterval: () => 0, clearInterval: () => {},
+    document: {
+      getElementById: () => null, querySelector: () => null,
+      // watermark 模块写入 CSS 变量所需的 documentElement 桩
+      documentElement: { style: { setProperty: () => {}, removeProperty: () => {} } },
+    },
   });
   return state;
 }
@@ -76,6 +81,8 @@ it('renders only the login form before authentication and rejects unknown server
   const render = () => renderToString(createSSRApp({ template, setup: () => state }));
   expect(await render()).toContain('登录工作台');
   expect(await render()).not.toContain('收支登记');
+  // 未登录：不出现水印标记（登录页无身份，无追溯意义）
+  expect(await render()).not.toContain('watermarked');
   await state.login();
   expect(state.session.value).toBeNull();
   expect(state.authError.value).toContain('账号角色或归属无效');
@@ -88,6 +95,8 @@ it.each([
   const browser = await harness();
   await browser.login(username!);
   expect(browser.state.session.value?.role).toBe(role);
+  // 登录成功：出现水印标记（watermark 模块）
+  expect(browser.state.watermarked?.value).toBe(true);
   const html = await browser.render();
   expect(html).toContain(`<h1>${title}</h1>`);
   expect(html).not.toContain('角色切换');

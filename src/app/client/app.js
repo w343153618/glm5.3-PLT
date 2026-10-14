@@ -22,6 +22,32 @@ createApp({
     const photoFileInput = ref(null);
     const photoViewing = ref(null);
     const photoTargetOrderId = ref('');
+    // ---- 页面水印（watermark 模块）----
+    const watermarked = ref(false);
+    let watermarkTimer = null;
+    function escapeSvgText(text) {
+      const map = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
+      return String(text).replace(/[&<>"']/g, ch => map[ch]);
+    }
+    function refreshWatermark(username) {
+      const now = new Date();
+      const date = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+      const time = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+      const text = escapeSvgText(`${username} ${date} ${time}`);
+      const svg = `<svg xmlns='http://www.w3.org/2000/svg' width='200' height='140'><text x='18' y='118' font-size='13' fill='#176458' fill-opacity='0.5' font-family='sans-serif' transform='rotate(-28 18 118)'>${text}</text></svg>`;
+      document.documentElement.style.setProperty('--watermark-image', `url("data:image/svg+xml,${encodeURIComponent(svg)}")`);
+    }
+    function startWatermark(username) {
+      stopWatermark();
+      watermarked.value = true;
+      refreshWatermark(username);
+      watermarkTimer = setInterval(() => refreshWatermark(username), 60 * 1000);
+    }
+    function stopWatermark() {
+      watermarked.value = false;
+      if (watermarkTimer) { clearInterval(watermarkTimer); watermarkTimer = null; }
+      document.documentElement.style.removeProperty('--watermark-image');
+    }
     const portfolio = ref(null);
     const calendar = ref([]);
     const clients = ref([]);
@@ -255,6 +281,7 @@ createApp({
         throw new Error('账号角色或归属无效，请联系管理员。');
       }
       session.value = actor;
+      startWatermark(actor.username);
       syncHash();
     }
     async function api(path, body, method = 'POST', headers = {}) {
@@ -295,6 +322,7 @@ createApp({
       clearScope();
       clearTimeout(toastTimer);
       stopPolling();
+      stopWatermark();
       session.value = null;
       bootstrap.value = { today: '', stores: [], managers: [], clients: [] };
       portfolio.value = null; calendar.value = [];
@@ -939,6 +967,6 @@ createApp({
       }
       initialize();
     });
-    return { view, bootstrap, session, authChecking, authBusy, authError, logoutUnconfirmed, loginForm, registerForm, registerMode, referral, referralError, referralToast, qrCanvas, photoDialog, photoFileInput, photoViewing, role, roleTitle, roleLabel, manager, store, client, ownClients, portfolio, calendar, clients, orders, bills, ledger, audits, attributionSummary, attributionTotals, referralStats, summary, storedCount, loading, scopeLoading, error, scopeError, formError, failedForm, pending, toast, day, dayDialog, orderDialog, followDialog, customDialog, portfolioDialog, followForm, followTotalCost, customForm, customQuantity, customSelectedCode, customTotalCost, customGroupType, toggleBall, selectAllBalls, clearBalls, setCustomMode, formatOrderCode, orderModeTag, isEditingPortfolio, orderForm, adjustmentForm, adjustmentUnconfirmed, adjustmentClient, adjustmentBalance, adjustmentInvalid, startAdjustment, resultForm, portfolioForm, storeForm, managerForm, clientForm, management, hqDate, title, hitCount, verifiedCount, calendarPadding, billMap, money, shortDate, dateTime, clientName, managerName, storeName, statusLabel, voucherLabel, syncing, syncMsg, syncOfficialLottery, initialize, login, register, copyReferralLink, recordReferralShare, photoUrl, pickPhoto, onPhotoPicked, openPhoto, logout, loadScope, loadGlobal, openDay, openOrder, openFollow, submitFollowOrder, openCustomOrder, randomCustomCode, submitCustomOrder, getOrderResolution, openPortfolioDialog, editPortfolioToday, savePortfolioModal, openManagement, closeOrder, saveOrder, claimVoucher, saveAdjustment, saveResolution, savePortfolio, saveStore, saveManager, saveClient, switchView, syncHash };
+    return { view, bootstrap, session, authChecking, authBusy, authError, logoutUnconfirmed, loginForm, registerForm, registerMode, referral, referralError, referralToast, qrCanvas, photoDialog, photoFileInput, photoViewing, watermarked, role, roleTitle, roleLabel, manager, store, client, ownClients, portfolio, calendar, clients, orders, bills, ledger, audits, attributionSummary, attributionTotals, referralStats, summary, storedCount, loading, scopeLoading, error, scopeError, formError, failedForm, pending, toast, day, dayDialog, orderDialog, followDialog, customDialog, portfolioDialog, followForm, followTotalCost, customForm, customQuantity, customSelectedCode, customTotalCost, customGroupType, toggleBall, selectAllBalls, clearBalls, setCustomMode, formatOrderCode, orderModeTag, isEditingPortfolio, orderForm, adjustmentForm, adjustmentUnconfirmed, adjustmentClient, adjustmentBalance, adjustmentInvalid, startAdjustment, resultForm, portfolioForm, storeForm, managerForm, clientForm, management, hqDate, title, hitCount, verifiedCount, calendarPadding, billMap, money, shortDate, dateTime, clientName, managerName, storeName, statusLabel, voucherLabel, syncing, syncMsg, syncOfficialLottery, initialize, login, register, copyReferralLink, recordReferralShare, photoUrl, pickPhoto, onPhotoPicked, openPhoto, logout, loadScope, loadGlobal, openDay, openOrder, openFollow, submitFollowOrder, openCustomOrder, randomCustomCode, submitCustomOrder, getOrderResolution, openPortfolioDialog, editPortfolioToday, savePortfolioModal, openManagement, closeOrder, saveOrder, claimVoucher, saveAdjustment, saveResolution, savePortfolio, saveStore, saveManager, saveClient, switchView, syncHash };
   },
 }).mount('#app');

@@ -15,7 +15,7 @@
   <script type="module" src="/app.js"></script>
 </head>
 <body>
-<div id="app" v-cloak>
+<div id="app" v-cloak :watermarked="watermarked || undefined">
   <main v-if="!session" class="auth-shell">
     <section class="auth-panel" aria-labelledby="login-title">
       <div class="auth-brand"><svg viewBox="0 0 32 32" aria-hidden="true"><path d="M5 26V8h9v18M18 26V14h9v12M3 26h26M8 12h3m-3 5h3m10 1h3m-3 4h3"/></svg><span>门店档案</span></div>
