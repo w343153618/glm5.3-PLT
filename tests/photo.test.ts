@@ -34,7 +34,7 @@ describe('detectImageMime', () => {
 });
 
 describe('photo module save/read', () => {
-  it('saves a PNG, returns a rotating token, and reads it back with the correct mime', () => {
+  it('saves a PNG, returns a rotating token, and reads it back with the correct mime', async () => {
     const photo = createPhotoModule(workDir);
     const orderId = randomUUID();
     const stored = photo.save(orderId, { photoBase64: MINIMAL_PNG.toString('base64') });
@@ -43,6 +43,8 @@ describe('photo module save/read', () => {
     expect(readdirSync(join(workDir, 'photos'))).toEqual([`${orderId}.png`]);
     const result = photo.read(orderId, stored.token, stored);
     expect(result.mime).toBe('image/png');
+    // 等流读完关闭，避免 afterEach 清理目录与异步 open 竞争
+    await new Promise<void>((resolve) => { result.stream.on('close', resolve); result.stream.resume(); });
   });
 
   it('re-save overwrites and rotates the token, invalidating the old one', () => {
@@ -52,7 +54,8 @@ describe('photo module save/read', () => {
     const second = photo.save(orderId, { photoBase64: MINIMAL_JPEG.toString('base64') });
     expect(second.token).not.toBe(first.token);
     expect(readdirSync(join(workDir, 'photos'))).toEqual([`${orderId}.jpg`]); // 旧 png 被替换
-    expect(() => photo.read(orderId, first.token, second)).toThrow(DomainError); // 旧 token 失效
+    // 旧 token 失效（校验在打开文件之前抛出，无流产生）
+    expect(() => photo.read(orderId, first.token, second)).toThrow(DomainError);
   });
 
   it('accepts dataURL-prefixed base64', () => {
@@ -108,12 +111,13 @@ describe('photo module save/read', () => {
     }
   });
 
-  it('drains the stream so cleanup does not race an open file handle', () => {
+  it('drains the stream so cleanup does not race an open file handle', async () => {
     const photo = createPhotoModule(workDir);
     const orderId = randomUUID();
     const stored = photo.save(orderId, { photoBase64: MINIMAL_PNG.toString('base64') });
     const { stream } = photo.read(orderId, stored.token, stored);
-    stream.on('data', () => {}); // 消费完毕再由 afterEach 清理目录
+    // 等流真正关闭（读完）再结束用例，afterEach 清理目录不会与异步 open 竞争
+    await new Promise<void>((resolve) => { stream.on('close', resolve); stream.resume(); });
   });
 });
 

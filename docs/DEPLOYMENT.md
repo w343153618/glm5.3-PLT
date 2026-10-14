@@ -66,6 +66,39 @@ docker compose up --detach --wait
 
 如果容器健康等待失败，查看日志，检查磁盘空间、UID/GID、目录权限、环境变量和端口占用。修正后可重复运行启动脚本。不要删除 `data/` 来排除启动错误。
 
+## 公网部署：腾讯云新加坡 101.32.167.156 高端口
+
+目标形态：Caddy（`https-proxy` 服务，host 网络）直接监听 `https://101.32.167.156:19888/` 做 HTTPS 终结与 APK 分发，反代到仅绑定 `127.0.0.1:19889` 的应用容器；公网流量无法直达 Node 进程。三处对外地址必须保持一致（见文末核对表）。
+
+在全新服务器上按以下顺序操作（需要 Docker Engine 与 Compose v2+，以及 git clone 本仓库）：
+
+1. **证书**：生成自签证书放入 `ssl/`（目录已被 `.gitignore` 排除，私钥不入库）：
+   ```sh
+   mkdir -p ssl
+   openssl req -x509 -newkey rsa:2048 -nodes -days 3650 \
+     -keyout ssl/privkey.pem -out ssl/fullchain.pem \
+     -subj '/CN=101.32.167.156' -addext 'subjectAltName=IP:101.32.167.156'
+   ```
+   安卓壳 WebView 已容忍自签告警；手机浏览器首次访问会提示「不安全」，选择继续即可。换正式证书/域名时同步修改 `Caddyfile` 站点地址与安卓壳加载地址。
+2. **配置 `.env`**：`cp .env.example .env`，将 `COOKIE_SECURE=true`（HTTPS 场景 Cookie 仅安全传输）、`ERP_PORT=19889`、`DEMO_SEED=false`。首账号与归属建立参见 [AUTHENTICATION.md](./AUTHENTICATION.md)。
+3. **启动**：`./scripts/start.sh`——构建应用容器并等待健康检查；随后 Caddy 容器自动随 compose 起来（`restart: always`）。验证：
+   ```sh
+   curl -k https://101.32.167.156:19888/api/health
+   docker compose logs --tail 100 https-proxy
+   ```
+4. **分发安卓安装包**：将 `pailie3.apk` 放到仓库根目录（已被 `.gitignore` 排除，不入 Git），手机浏览器访问 `https://101.32.167.156:19888/pailie3.apk` 即可下载离线安装。
+5. **防火墙/安全组**：在腾讯云安全组放行入站 TCP `19888`（仅此一个端口；19889 只监听 loopback，无须也不应放行）。
+
+**对外地址一致性核对表**（三处必须指向同一地址，改动任一处须同步其余两处）：
+
+| 位置 | 地址 |
+| --- | --- |
+| `Caddyfile` 站点块 | `https://101.32.167.156:19888` |
+| 安卓壳 `android-app/app/src/main/java/com/pailie3/store/MainActivity.java`（`loadUrl`） | `https://101.32.167.156:19888/` |
+| 推广二维码/分享链接 | 前端用 `window.location` 动态生成，自动跟随访问地址，无需改动 |
+
+公网运行的其他注意事项：`COOKIE_SECURE=true` 后 cookie 不再经 HTTP 明文传输；升级前先 `./scripts/backup.sh`；`data/photos/` 的迁移要求见上文备份章节；云服务器需保证磁盘余量（SQLite WAL 与照片文件同盘）。
+
 ## 本地验证范围
 
 `npm test` 中的 `deployment.test.ts` 使用真实 SQLite 文件与 WAL，验证包含已提交数据、排除进行中事务、拒绝覆盖快照、恢复前留档、损坏快照不替换数据和空目录恢复；另验证恢复脚本先停写、失败保持停止与路径校验。`docker compose config --quiet` 检查 Compose 配置语法。镜像构建和实际健康启动需要本机 Docker daemon、基础镜像及依赖可用；这两类验证应单独记录，不把单元测试等同于云服务器部署完成。

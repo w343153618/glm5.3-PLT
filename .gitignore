@@ -3,3 +3,6 @@ coverage/
 dist/
 *.tsbuildinfo
 /data/
+# 部署件不入库：安卓安装包（手动上传服务器）与 TLS 证书私钥
+/pailie3.apk
+/ssl/

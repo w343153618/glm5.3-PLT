@@ -1,0 +1,31 @@
+# 排列3 ERP 公网入口（腾讯云新加坡 101.32.167.156 高端口）
+# 容器以 network_mode: host 运行，直接监听宿主 19888 端口；
+# 应用容器仅绑定 127.0.0.1:19889，公网流量必须经本反向代理。
+#
+# 证书：将 fullchain.pem 与 privkey.pem 放入 ./ssl/（服务器的 /etc/caddy/ssl/）。
+# 自签证书生成示例（在服务器上执行一次）：
+#   mkdir -p ssl
+#   openssl req -x509 -newkey rsa:2048 -nodes -days 3650 \
+#     -keyout ssl/privkey.pem -out ssl/fullchain.pem \
+#     -subj '/CN=101.32.167.156' -addext 'subjectAltName=IP:101.32.167.156'
+# 安卓壳 WebView 已容忍自签告警（onReceivedSslError -> proceed）；
+# 换正式证书/域名时同步修改此处站点地址与 android-app 的 MainActivity 加载地址。
+
+https://101.32.167.156:19888 {
+	tls /etc/caddy/ssl/fullchain.pem /etc/caddy/ssl/privkey.pem
+
+	encode gzip
+
+	# 安卓离线安装包分发：https://101.32.167.156:19888/pailie3.apk
+	# 文件放仓库根 ./pailie3.apk（已挂载为 /usr/share/caddy/pailie3.apk，不入 Git）。
+	handle /pailie3.apk {
+		header Content-Type application/vnd.android.package-archive
+		header Content-Disposition attachment
+		file_server
+	}
+
+	# 其余全部反代到仅监听本机的应用容器
+	handle {
+		reverse_proxy 127.0.0.1:19889
+	}
+}
