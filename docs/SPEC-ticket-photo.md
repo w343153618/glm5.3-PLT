@@ -12,14 +12,14 @@
 2. 作为客户，我在「历史记录」里看到订单的彩票照片缩略图，点开放大查看。
 3. 作为总部，我在订单表里可查看照片（只读）。
 
-**验收标准（具体可测）：**
-- [ ] `POST /api/orders/:orderId/photo`（manager）：body `{ photoBase64, filename? }`；校验归属店长；解析 base64 → 魔数校验必须为 JPEG（FFD8FF）或 PNG（89504E47）；大小 ≤ 5MB 解码后；存 `data/photos/<orderId>.jpg|png`；订单记录写入 `photoToken`（32 字节随机 hex）与 photoMime；重传覆盖旧文件（新 token 使旧 URL 失效）
-- [ ] `GET /api/orders/:orderId/photo?token=xxx`：token 恒定校验；client 仅本人订单、manager 仅名下订单、hq 全部可见；照片文件流返回，Content-Type 正确，Cache-Control: private, no-store
-- [ ] 错误用例：越权 403 / token 错 403 / 无照片 404 / 格式非 jpg/png 400 / 超 5MB 413 / base64 非法 400
-- [ ] 订单列表 API（stores/:storeId/orders、clients/:id/orders、hq/orders）响应中带 `hasPhoto: boolean`（不直接暴露 token，token 仅在订单详情中按角色返回——简化：列表响应含 photoToken，前端用其构造 URL，token 不可预测且每次重传轮换）
-- [ ] 前端：店长订单行显示「上传票照」按钮（file input + FileReader → base64 → POST）；上传中禁用按钮；成功 toast「票照已上传」
-- [ ] 前端：客户/店长/hq 订单行有照片时显示缩略图（img，40px），点击 <dialog> 放大
-- [ ] 备份兼容：photos 目录位于 data/ 下，随现有 backup/restore 脚本整体迁移（VACUUM INTO 不含照片，需在 DEPLOYMENT.md 注明：迁移时需单独拷贝 data/photos/）
+**验收标准（具体可测）——已全部满足 ✅ 2026-10-14：**
+- [x] `POST /api/orders/:orderId/photo`（manager）：body `{ photoBase64, filename? }`；校验归属店长；解析 base64 → 魔数校验必须为 JPEG（FFD8FF）或 PNG（89504E47）；大小 ≤ 5MB 解码后；存 `data/photos/<orderId>.jpg|png`；订单记录写入 `photoToken`（32 字节随机 hex）与 photoMime；重传覆盖旧文件（新 token 使旧 URL 失效）
+- [x] `GET /api/orders/:orderId/photo?token=xxx`：token 恒定校验；client 仅本人订单、manager 仅名下订单、hq 全部可见；照片文件流返回，Content-Type 正确，Cache-Control: private, no-store
+- [x] 错误用例：越权 403 / token 错 403 / 无照片 404 / 格式非 jpg/png 400 / 超 5MB 413 / base64 非法 400
+- [x] 订单列表 API（stores/:storeId/orders、clients/:id/orders、hq/orders）响应中带 `hasPhoto: boolean`（不直接暴露 token，token 仅在订单详情中按角色返回——简化：列表响应含 photoToken，前端用其构造 URL，token 不可预测且每次重传轮换）
+- [x] 前端：店长订单行显示「上传票照」按钮（file input + FileReader → base64 → POST）；上传中禁用按钮；成功 toast「票照已上传」
+- [x] 前端：客户/店长/hq 订单行有照片时显示缩略图（img，40px），点击 <dialog> 放大
+- [x] 备份兼容：photos 目录位于 data/ 下，随现有 backup/restore 脚本整体迁移（VACUUM INTO 不含照片，需在 DEPLOYMENT.md 注明：迁移时需单独拷贝 data/photos/）
 
 ## Tech Stack
 

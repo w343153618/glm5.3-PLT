@@ -45,6 +45,8 @@ docker compose up --detach --wait
 
 脚本使用 SQLite `VACUUM INTO` 创建一致快照，包含备份时已提交的 WAL 数据，排除未提交的事务；不直接复制正在写入的 `app.db`。快照先写入临时文件，通过 `PRAGMA quick_check` 后以独占方式发布到 `backups/`，权限为 `0600`。备份完成后数据库仍可正常使用。快照包含所有业务表和账号摘要，妥善限制备份访问权限，并复制到独立存储验证恢复。
 
+**票照文件（ticket-photo 模块）不在数据库快照内。** 照片以文件形式存放在 `data/photos/`（每单一图，文件名为订单 ID）。`backup.sh` 的数据库快照不包含这些文件；迁移或灾备时需在服务停止后单独打包 `data/photos/` 目录随快照一并转移，恢复时先执行 `restore.sh` 再把 `photos/` 放回 `data/` 下。订单记录中的 `photoToken` 保存在数据库里，照片文件与数据库不一致时查看会返回 404。
+
 不要在服务运行时单独复制 `app.db`，也不要分别、并行复制 `app.db` 和 `app.db-wal`。两种方式都可能得到不一致的数据。若要复制整个 `data/` 目录，先 `docker compose stop --timeout 30 erp-app`，确认容器停止后再整体复制，且复制期间不允许其他进程连接该目录。在线备份脚本适合不断服的常规快照。
 
 ## 恢复与新服务器迁移
