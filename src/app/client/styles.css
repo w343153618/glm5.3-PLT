@@ -262,3 +262,11 @@
 .notify-text{font-size:.9rem}
 .notify-dot{width:8px;height:8px;border-radius:50%;background:#c0392b;margin-top:6px;flex:none}
 .notify-empty{padding:24px 16px;color:var(--muted);font-size:.9rem;text-align:center}
+
+/* ---- report-share：战绩分享弹窗 ---- */
+.share-mode-toggle{display:flex;gap:8px;margin:0 0 12px}
+.share-mode-toggle button{flex:1;padding:8px 0;border:1px solid var(--line);border-radius:8px;background:var(--paper);cursor:pointer;font-size:.9rem}
+.share-mode-toggle button.active{background:#176458;color:#fff;border-color:#176458}
+.share-canvas-wrap{border:1px solid var(--line);border-radius:10px;overflow:hidden;background:#f2f5f3;margin-bottom:12px}
+.share-canvas-wrap canvas{display:block;width:100%;height:auto}
+.share-report-content{max-width:520px}

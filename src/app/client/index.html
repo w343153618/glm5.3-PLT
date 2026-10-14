@@ -152,7 +152,7 @@
           </div>
         </section>
         <section v-if="role !== 'manager' && view === 'calendar'" class="calendar-view">
-          <div class="calendar-top"><div><h2>{{ calendar.length ? shortDate(calendar[0].date) + ' — ' + shortDate(calendar[calendar.length - 1].date) : '近 30 天' }}</h2><p class="muted small">已核验 {{ verifiedCount }} 天 · 红 {{ hitCount }} 天 · 黑 {{ verifiedCount - hitCount }} 天</p></div><div style="display: flex; gap: 12px; align-items: center;"><button v-if="role === 'hq'" type="button" class="primary" style="padding: 4px 12px; font-size: 0.8rem;" @click="syncOfficialLottery" :disabled="syncing">{{ syncing ? '同步中…' : '⚡ 同步体彩开奖' }}</button><div class="legend"><span><i class="hit-dot"></i>红 / Hit</span><span><i class="miss-dot"></i>黑 / Miss</span><span><i></i>待核验</span></div></div></div>
+          <div class="calendar-top"><div><h2>{{ calendar.length ? shortDate(calendar[0].date) + ' — ' + shortDate(calendar[calendar.length - 1].date) : '近 30 天' }}</h2><p class="muted small">已核验 {{ verifiedCount }} 天 · 红 {{ hitCount }} 天 · 黑 {{ verifiedCount - hitCount }} 天</p></div><div style="display: flex; gap: 12px; align-items: center;"><button v-if="role === 'client'" type="button" class="primary" style="padding: 4px 12px; font-size: 0.8rem;" @click="openShareReport">📤 分享战绩</button><button v-if="role === 'hq'" type="button" class="primary" style="padding: 4px 12px; font-size: 0.8rem;" @click="syncOfficialLottery" :disabled="syncing">{{ syncing ? '同步中…' : '⚡ 同步体彩开奖' }}</button><div class="legend"><span><i class="hit-dot"></i>红 / Hit</span><span><i class="miss-dot"></i>黑 / Miss</span><span><i></i>待核验</span></div></div></div>
           <div class="calendar-week" aria-hidden="true"><span v-for="weekday in ['一', '二', '三', '四', '五', '六', '日']" :key="weekday">{{ weekday }}</span></div>
           <div class="calendar-grid"><span v-for="blank in calendarPadding" :key="'blank-' + blank" aria-hidden="true"></span><button v-for="item in calendar" :key="item.date" type="button" :class="['day-cell', item.status ? item.status.toLowerCase() : 'pending-day', { 'is-today': item.date === bootstrap.today }]" @click="openDay(item)" :aria-label="item.date + '，' + statusLabel(item) + '，查看详情'"><span>{{ item.date.slice(5).replace('-', '/') }}</span><strong>{{ item.status === 'Hit' ? '红' : item.status === 'Miss' ? '黑' : '待' }}</strong><small>{{ item.date === bootstrap.today ? '今天' : item.status || '待核验' }}</small></button></div>
         </section>
@@ -650,6 +650,26 @@
   </dialog>
   <dialog ref="photoDialog" class="drawer" aria-labelledby="photo-title" @click="$event.target === photoDialog && photoDialog.close()"><div class="drawer-content photo-viewer"><div class="drawer-heading"><div><h2 id="photo-title">彩票票照</h2><p v-if="photoViewing">{{ photoViewing.date }} · {{ formatOrderCode(photoViewing) }}</p></div><button type="button" class="icon-button" aria-label="关闭票照" @click="photoDialog.close()"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button></div><img v-if="photoViewing" :src="photoUrl(photoViewing)" alt="彩票照片" style="width: 100%; border-radius: 10px; border: 1px solid var(--line);"><button type="button" class="wide" style="margin-top: 10px;" @click="photoDialog.close()">关闭</button></div></dialog>
   <div class="toast" :class="{ visible: toast }" role="status" aria-live="polite">{{ toast }}</div>
+  <!-- report-share：红黑战绩周报分享图 -->
+  <dialog v-if="role === 'client' && shareReport.visible" ref="shareReportDialog" class="drawer" aria-labelledby="share-report-title" open @click="$event.target === shareReportDialog && (shareReport.visible = false)">
+    <div class="drawer-content share-report-content">
+      <div class="drawer-heading">
+        <div>
+          <h2 id="share-report-title">分享战绩</h2>
+          <p class="muted small">红黑如实 · 历史统计仅供参考</p>
+        </div>
+        <button type="button" class="icon-button" aria-label="关闭战绩分享" @click="shareReport.visible = false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button>
+      </div>
+      <div class="share-mode-toggle" role="tablist" aria-label="统计周期">
+        <button type="button" :class="{ active: shareReport.mode === 'week' }" role="tab" :aria-selected="shareReport.mode === 'week'" @click="setShareMode('week')">本周</button>
+        <button type="button" :class="{ active: shareReport.mode === 'month' }" role="tab" :aria-selected="shareReport.mode === 'month'" @click="setShareMode('month')">本月</button>
+      </div>
+      <p v-if="shareReport.error" class="notice error" role="alert">{{ shareReport.error }}</p>
+      <div class="share-canvas-wrap"><canvas ref="shareCanvas" aria-label="战绩分享图预览"></canvas></div>
+      <button type="button" class="primary wide" :disabled="!shareReport.canvasReady" @click="saveShareReport">保存图片（PNG）</button>
+      <p class="muted small" style="text-align: center;">保存后可发到微信群 · 图内含您的邀请二维码</p>
+    </div>
+  </dialog>
   </template>
 </div>
 <noscript><p>请启用 JavaScript 以使用门店工作台。</p></noscript>

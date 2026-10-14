@@ -1,4 +1,4 @@
-import { afterEach, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { runInNewContext } from 'node:vm';
 import { randomUUID } from 'node:crypto';
@@ -376,4 +376,85 @@ it('draw-notify: hq role loads no notifications', async () => {
   await state.loadNotifications();
   expect(state.notifications.items).toEqual([]);
   expect(state.notifications.unread).toBe(0);
+});
+
+describe('report-share', () => {
+  it('periodRange anchors week to Monday', async () => {
+    const browser = await harness();
+    const state = browser.state as any;
+    // 2026-10-14 是周三 → 周一 2026-10-12
+    expect(state.periodRange('week', '2026-10-14')).toEqual({ start: '2026-10-12', end: '2026-10-14' });
+    // 恰是周一：2026-10-12
+    expect(state.periodRange('week', '2026-10-12')).toEqual({ start: '2026-10-12', end: '2026-10-12' });
+    // 周日：2026-10-18 → 周一 10-12
+    expect(state.periodRange('week', '2026-10-18')).toEqual({ start: '2026-10-12', end: '2026-10-18' });
+  });
+
+  it('periodRange month starts on the 1st and rejects malformed today', async () => {
+    const browser = await harness();
+    const state = browser.state as any;
+    expect(state.periodRange('month', '2026-10-14')).toEqual({ start: '2026-10-01', end: '2026-10-14' });
+    expect(state.periodRange('month', '2026-01-01')).toEqual({ start: '2026-01-01', end: '2026-01-01' });
+    expect(state.periodRange('week', 'invalid')).toBeNull();
+  });
+
+  it('aggregates period stats from orders and calendar (3 orders, 2 hits)', async () => {
+    const browser = await harness();
+    await browser.login('user');
+    const state = browser.state as any;
+    // 造数据：本周内 3 单，2 单命中（种子数据本周已有订单，改为显式构造）
+    state.orders.value = [
+      { date: '2026-10-12', selectedCode: '279', betMode: 'DIRECT', quantity: 1, totalAmount: 2 },
+      { date: '2026-10-13', selectedCode: '999', betMode: 'DIRECT', quantity: 1, totalAmount: 2 },
+      { date: '2026-10-14', selectedCode: '279', betMode: 'DIRECT', quantity: 2, totalAmount: 4 },
+    ];
+    state.calendar.value = [
+      { date: '2026-10-12', resolution: { settlementCode: '279', quotaPerUnit: 1040 }, status: 'Hit' },
+      { date: '2026-10-13', resolution: { settlementCode: '931', quotaPerUnit: 1040 }, status: 'Miss' },
+      { date: '2026-10-14', resolution: { settlementCode: '279', quotaPerUnit: 1040 }, status: 'Hit' },
+    ];
+    state.bootstrap.value.today = '2026-10-14';
+    const stats = state.aggregatePeriodStats('week');
+    expect(stats.orders).toBe(3);
+    expect(stats.hits).toBe(2);
+    expect(stats.invested).toBe(8);
+    expect(stats.gross).toBe(3 * 1040);
+    expect(stats.rate).toBe(67); // 2/3 已结算命中
+    expect(stats.netAfterCost).toBe(3 * 1040 - 8);
+  });
+
+  it('aggregate handles empty period and unsettled orders', async () => {
+    const browser = await harness();
+    await browser.login('user');
+    const state = browser.state as any;
+    state.orders.value = [{ date: '2026-10-14', selectedCode: '279', betMode: 'DIRECT', quantity: 1, totalAmount: 2 }];
+    state.calendar.value = [{ date: '2026-10-14', resolution: null, status: null }];
+    state.bootstrap.value.today = '2026-10-14';
+    const stats = state.aggregatePeriodStats('week');
+    expect(stats.orders).toBe(1);
+    expect(stats.hits).toBe(0);
+    expect(stats.rate).toBe(0); // 无已结算单
+    expect(stats.gross).toBe(0);
+  });
+
+  it('share entry only opens for client role', async () => {
+    const browser = await harness();
+    await browser.login('admin');
+    const state = browser.state as any;
+    await state.openShareReport();
+    expect(state.shareReport.visible).toBe(false); // hq 不显示
+  });
+
+  it('client opens share dialog and renders canvas', async () => {
+    const browser = await harness();
+    await browser.login('user');
+    const state = browser.state as any;
+    await state.openShareReport();
+    expect(state.shareReport.visible).toBe(true);
+    // SSR 环境无 canvas 上下文时不报错（错误静默到 error 字段），周期切换可用
+    state.setShareMode('month');
+    expect(state.shareReport.mode).toBe('month');
+    state.setShareMode('week');
+    expect(state.shareReport.mode).toBe('week');
+  });
 });

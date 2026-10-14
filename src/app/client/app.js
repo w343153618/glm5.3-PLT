@@ -98,6 +98,9 @@ createApp({
     const nextDraw = reactive({ time: null, countdown: '' });
     let countdownTimer = null;
     let recentStale = false;
+    // report-share：红黑战绩周报分享图（客户专属）
+    const shareReport = reactive({ visible: false, mode: 'week', busy: false, error: '', canvasReady: false });
+    const shareCanvas = ref(null);
     // draw-notify：应用内消息中心（客户/店长）
     const notifications = reactive({ items: [], unread: 0, visible: false, loading: false });
     const management = ref(false);
@@ -332,6 +335,188 @@ createApp({
       orderDialog.value?.close(); dayDialog.value?.close(); followDialog.value?.close(); customDialog.value?.close(); codeHistoryDialog.value?.close(); day.value = null;
     }
     // draw-notify：加载消息中心（client/manager 登录后；失败静默）
+    // report-share：周期计算——本周=周一(含)至今；本月=1日(含)至今；锚定 bootstrap.today（北京时间）
+    function periodRange(mode, today) {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(today)) return null;
+      const [y, m, d] = today.split('-').map(Number);
+      if (mode === 'month') return { start: `${today.slice(0, 7)}-01`, end: today };
+      const date = new Date(Date.UTC(y, m - 1, d));
+      const weekday = (date.getUTCDay() + 6) % 7; // 周一=0
+      date.setUTCDate(date.getUTCDate() - weekday);
+      const start = date.toISOString().slice(0, 10);
+      return start <= today ? { start, end: today } : { start: today, end: today };
+    }
+    // report-share：聚合周期内战绩（全从已加载 orders + calendar 推算，无新请求）
+    function aggregatePeriodStats(mode) {
+      const range = periodRange(mode, bootstrap.value.today || '');
+      if (!range) return null;
+      const periodOrders = orders.value.filter(order => order.date >= range.start && order.date <= range.end);
+      let hits = 0, gross = 0, net = 0, invested = 0;
+      for (const order of periodOrders) {
+        invested += Number(order.totalAmount) || 0;
+        const res = getOrderResolution(order);
+        if (!res.isResolved) continue;
+        if (res.isHit) {
+          hits += 1;
+          const gain = (Number(order.quantity) || 1) * res.quotaPerUnit;
+          gross += gain;
+          // 佣金 20%（毛收益口径，与 settlement 模块一致）
+          net += Math.round(gain * 0.8 * 100) / 100;
+        }
+      }
+      const settleable = periodOrders.filter(order => getOrderResolution(order).isResolved).length;
+      return {
+        range, orders: periodOrders.length, hits,
+        rate: settleable > 0 ? Math.round((hits / settleable) * 100) : 0,
+        invested, gross, net, netAfterCost: Math.round((gross - invested) * 100) / 100,
+      };
+    }
+    async function openShareReport() {
+      if (role.value !== 'client') return;
+      shareReport.visible = true; shareReport.error = ''; shareReport.canvasReady = false;
+      // 确保推广码就绪（分享图右下角二维码）
+      if (!referral.link) await loadReferral().catch(() => {});
+      await nextTick();
+      renderShareReport();
+    }
+    function setShareMode(mode) {
+      if (shareReport.mode === mode) return;
+      shareReport.mode = mode;
+      renderShareReport();
+    }
+    function renderShareReport() {
+      const canvas = shareCanvas.value;
+      if (!canvas) return;
+      const stats = aggregatePeriodStats(shareReport.mode);
+      if (!stats) { shareReport.error = '日期数据异常，请刷新后重试。'; return; }
+      try {
+        drawShareReport(canvas, stats, {
+          mode: shareReport.mode, today: bootstrap.value.today || '',
+          storeName: store.value?.name || '门店档案', username: session.value?.username || '',
+          hitDays: hitCount.value, verifiedDays: verifiedCount.value,
+          qrLink: referral.link, drawQr: (target) => drawQrToCanvas(target, encodeQr(referral.link || window.location.origin)),
+        });
+        shareReport.canvasReady = true; shareReport.error = '';
+      } catch (failure) {
+        shareReport.canvasReady = false;
+        shareReport.error = '战绩卡生成失败，请重试。';
+      }
+    }
+    // report-share：Canvas 绘制——750 逻辑像素宽卡片，红黑如实
+    function drawShareReport(canvas, stats, meta) {
+      const W = 750, PAD = 44;
+      const HAS_DATA = stats.orders > 0;
+      const HEAD = 172, BODY = HAS_DATA ? 452 : 240, FOOT = 96;
+      const H = HEAD + BODY + FOOT;
+      canvas.width = W; canvas.height = H;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) throw new Error('no 2d context');
+      // 背景
+      ctx.fillStyle = '#f2f5f3'; ctx.fillRect(0, 0, W, H);
+      // 头部深绿块
+      ctx.fillStyle = '#176458'; ctx.fillRect(0, 0, W, HEAD);
+      ctx.fillStyle = '#ffffff'; ctx.textBaseline = 'alphabetic';
+      ctx.font = '600 30px -apple-system, "PingFang SC", sans-serif';
+      ctx.fillText(`${meta.storeName} · 排列3`, PAD, 66);
+      ctx.font = '400 22px -apple-system, "PingFang SC", sans-serif';
+      ctx.fillStyle = 'rgba(255,255,255,.85)';
+      const label = meta.mode === 'week' ? '本周' : '本月';
+      ctx.fillText(`${label}实战战绩（${stats.range.start.slice(5).replace('-', '/')} — ${stats.range.end.slice(5).replace('-', '/')}）`, PAD, 104);
+      ctx.fillStyle = 'rgba(255,255,255,.6)'; ctx.font = '400 18px -apple-system, "PingFang SC", sans-serif';
+      ctx.fillText('红黑如实记录', PAD, 140);
+      // 数字区
+      if (!HAS_DATA) {
+        ctx.fillStyle = '#7a8a85'; ctx.font = '400 26px -apple-system, "PingFang SC", sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('本期暂无跟单记录', W / 2, HEAD + 120);
+        ctx.textAlign = 'left';
+      } else {
+        const rows = [
+          { label: '跟单注数', value: `${stats.orders} 注` },
+          { label: '命中注数', value: `${stats.hits} 注` },
+          { label: '命中率', value: `${stats.rate}%` },
+          { label: '总投入', value: `¥${stats.invested.toFixed(2)}` },
+          { label: '总奖金', value: `¥${stats.gross.toFixed(2)}` },
+        ];
+        const colW = (W - PAD * 2) / 3;
+        for (const [i, row] of rows.entries()) {
+          const col = i % 3, row_ = Math.floor(i / 3);
+          const x = PAD + col * colW, y = HEAD + 74 + row_ * 128;
+          ctx.fillStyle = '#7a8a85'; ctx.font = '400 20px -apple-system, "PingFang SC", sans-serif';
+          ctx.fillText(row.label, x, y);
+          ctx.fillStyle = '#17322c'; ctx.font = '600 40px -apple-system, "PingFang SC", sans-serif';
+          ctx.fillText(row.value, x, y + 48);
+        }
+        // 净盈亏横条（红正绿负，如实）
+        const positive = stats.netAfterCost >= 0;
+        ctx.fillStyle = positive ? '#c0392b' : '#1e7d4f';
+        const barY = HEAD + 74 + 2 * 128 - 44;
+        roundRect(ctx, PAD, barY, W - PAD * 2, 84, 14); ctx.fill();
+        ctx.fillStyle = '#ffffff';
+        ctx.font = '400 20px -apple-system, "PingFang SC", sans-serif';
+        ctx.fillText('净盈亏（奖金 − 投入）', PAD + 22, barY + 33);
+        ctx.font = '600 36px -apple-system, "PingFang SC", sans-serif';
+        ctx.fillText(`${positive ? '+' : ''}¥${stats.netAfterCost.toFixed(2)}`, PAD + 22, barY + 72);
+        if (stats.net > 0) {
+          ctx.font = '400 17px -apple-system, "PingFang SC", sans-serif';
+          ctx.fillStyle = 'rgba(255,255,255,.8)';
+          ctx.fillText(`（税后实得约 ¥${stats.net.toFixed(2)}）`, PAD + 320, barY + 62);
+        }
+      }
+      // 底部
+      ctx.fillStyle = '#e6ebe8'; ctx.fillRect(0, H - FOOT, W, FOOT);
+      ctx.fillStyle = '#7a8a85'; ctx.font = '400 16px -apple-system, "PingFang SC", sans-serif';
+      ctx.fillText('历史统计仅供参考 · 扫码注册跟我选号', PAD, H - 56);
+      ctx.font = '400 14px -apple-system, "PingFang SC", sans-serif';
+      ctx.fillText(`生成于 ${meta.today}`, PAD, H - 30);
+      // 二维码（右下角，白底）
+      const qrSize = 72, qrX = W - PAD - qrSize, qrY = H - FOOT + 12;
+      ctx.fillStyle = '#ffffff';
+      roundRect(ctx, qrX - 8, qrY - 8, qrSize + 16, qrSize + 16, 8); ctx.fill();
+      const qrCanvasEl = document.createElement('canvas');
+      meta.drawQr(qrCanvasEl);
+      if (qrCanvasEl.width > 0) ctx.drawImage(qrCanvasEl, qrX, qrY, qrSize, qrSize);
+      // 水印平铺（用户名+日期，半透明斜纹，防截图溯源）
+      const mark = `${meta.username} ${meta.today}`;
+      ctx.save();
+      ctx.rotate(-0.35);
+      ctx.font = '400 16px -apple-system, "PingFang SC", sans-serif';
+      ctx.fillStyle = 'rgba(23,50,44,.06)';
+      for (let x = -H; x < W + H; x += 260) {
+        for (let y = -80; y < H + 80; y += 110) {
+          ctx.fillText(mark, x + ((y / 110) % 2) * 130, y);
+        }
+      }
+      ctx.restore();
+      function roundRect(context, x, y, w, h, r) {
+        context.beginPath();
+        context.moveTo(x + r, y);
+        context.arcTo(x + w, y, x + w, y + h, r);
+        context.arcTo(x + w, y + h, x, y + h, r);
+        context.arcTo(x, y + h, x, y, r);
+        context.arcTo(x, y, x + w, y, r);
+        context.closePath();
+      }
+    }
+    function saveShareReport() {
+      const canvas = shareCanvas.value;
+      if (!canvas || !shareReport.canvasReady) return;
+      try {
+        const stamp = (bootstrap.value.today || '').replace(/-/g, '');
+        canvas.toBlob(blob => {
+          if (!blob) { shareReport.error = '保存失败，请重试。'; return; }
+          const url = URL.createObjectURL(blob);
+          const link = document.createElement('a');
+          link.href = url; link.download = `战绩卡-${stamp}.png`;
+          link.click();
+          setTimeout(() => URL.revokeObjectURL(url), 3000);
+          recordReferralShare();
+        }, 'image/png');
+      } catch {
+        shareReport.error = '保存失败，请重试。';
+      }
+    }
+
     async function loadNotifications() {
       if (!session.value || (session.value.role !== 'client' && session.value.role !== 'manager')) return;
       try {
@@ -382,6 +567,8 @@ createApp({
       recentStale = false; recentDraws.value = []; luckyList.value = [];
       // draw-notify：清理消息中心
       notifications.items = []; notifications.unread = 0; notifications.visible = false; notifications.loading = false;
+      // report-share：清理战绩卡
+      shareReport.visible = false; shareReport.mode = 'week'; shareReport.busy = false; shareReport.error = ''; shareReport.canvasReady = false;
       wechatForm.input = ''; wechatForm.saved = null; wechatForm.managerWechat = null; wechatForm.managerName = ''; wechatForm.busy = false; wechatForm.toast = '';
       clearTimeout(wechatToastTimer);
       nextDraw.time = null; nextDraw.countdown = '';
@@ -1236,6 +1423,6 @@ createApp({
       }
       initialize();
     });
-    return { view, bootstrap, session, authChecking, authBusy, authError, logoutUnconfirmed, loginForm, registerForm, registerMode, referral, referralError, referralToast, qrCanvas, photoDialog, photoFileInput, photoViewing, watermarked, role, roleTitle, roleLabel, manager, store, client, ownClients, portfolio, calendar, clients, orders, bills, ledger, audits, attributionSummary, attributionTotals, referralStats, summary, storedCount, loading, scopeLoading, error, scopeError, formError, failedForm, pending, toast, day, dayDialog, orderDialog, followDialog, customDialog, codeHistoryDialog, portfolioDialog, followForm, followTotalCost, customForm, customQuantity, customSelectedCode, customTotalCost, customGroupType, customFormCard, recentRepeatHint, recentDraws, pickFilters, wechatForm, loadWechat, saveWechat, copyWechat, pickFilterMsg, smartRandomCode, luckyList, luckyBusy, saveLuckyCode, removeLuckyCode, fillFromLucky, trendsPanel, toggleTrendsPanel, switchTrendsWindow, codeHistoryView, lookupCodeHistory, nextDraw, notifications, toggleNotifications, markAllNotificationsRead, notificationIcon, notificationText, loadNotifications, toggleBall, selectAllBalls, clearBalls, setCustomMode, formatOrderCode, orderModeTag, isEditingPortfolio, orderForm, adjustmentForm, adjustmentUnconfirmed, adjustmentClient, adjustmentBalance, adjustmentInvalid, startAdjustment, resultForm, portfolioForm, storeForm, managerForm, clientForm, management, hqDate, title, hitCount, verifiedCount, calendarPadding, billMap, money, shortDate, dateTime, clientName, managerName, storeName, statusLabel, voucherLabel, syncing, syncMsg, syncOfficialLottery, initialize, login, register, copyReferralLink, recordReferralShare, photoUrl, pickPhoto, onPhotoPicked, openPhoto, logout, loadScope, loadGlobal, openDay, openOrder, openFollow, submitFollowOrder, openCustomOrder, randomCustomCode, submitCustomOrder, getOrderResolution, openPortfolioDialog, editPortfolioToday, savePortfolioModal, openManagement, closeOrder, saveOrder, claimVoucher, saveAdjustment, saveResolution, savePortfolio, saveStore, saveManager, saveClient, switchView, syncHash };
+    return { view, bootstrap, session, authChecking, authBusy, authError, logoutUnconfirmed, loginForm, registerForm, registerMode, referral, referralError, referralToast, qrCanvas, photoDialog, photoFileInput, photoViewing, watermarked, role, roleTitle, roleLabel, manager, store, client, ownClients, portfolio, calendar, clients, orders, bills, ledger, audits, attributionSummary, attributionTotals, referralStats, summary, storedCount, loading, scopeLoading, error, scopeError, formError, failedForm, pending, toast, day, dayDialog, orderDialog, followDialog, customDialog, codeHistoryDialog, portfolioDialog, followForm, followTotalCost, customForm, customQuantity, customSelectedCode, customTotalCost, customGroupType, customFormCard, recentRepeatHint, recentDraws, pickFilters, wechatForm, loadWechat, saveWechat, copyWechat, pickFilterMsg, smartRandomCode, luckyList, luckyBusy, saveLuckyCode, removeLuckyCode, fillFromLucky, trendsPanel, toggleTrendsPanel, switchTrendsWindow, codeHistoryView, lookupCodeHistory, nextDraw, notifications, toggleNotifications, markAllNotificationsRead, notificationIcon, notificationText, loadNotifications, shareReport, shareCanvas, openShareReport, setShareMode, saveShareReport, periodRange, aggregatePeriodStats, toggleBall, selectAllBalls, clearBalls, setCustomMode, formatOrderCode, orderModeTag, isEditingPortfolio, orderForm, adjustmentForm, adjustmentUnconfirmed, adjustmentClient, adjustmentBalance, adjustmentInvalid, startAdjustment, resultForm, portfolioForm, storeForm, managerForm, clientForm, management, hqDate, title, hitCount, verifiedCount, calendarPadding, billMap, money, shortDate, dateTime, clientName, managerName, storeName, statusLabel, voucherLabel, syncing, syncMsg, syncOfficialLottery, initialize, login, register, copyReferralLink, recordReferralShare, photoUrl, pickPhoto, onPhotoPicked, openPhoto, logout, loadScope, loadGlobal, openDay, openOrder, openFollow, submitFollowOrder, openCustomOrder, randomCustomCode, submitCustomOrder, getOrderResolution, openPortfolioDialog, editPortfolioToday, savePortfolioModal, openManagement, closeOrder, saveOrder, claimVoucher, saveAdjustment, saveResolution, savePortfolio, saveStore, saveManager, saveClient, switchView, syncHash };
   },
 }).mount('#app');
