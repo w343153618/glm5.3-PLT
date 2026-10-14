@@ -166,3 +166,12 @@
   border-radius: 8px;
 }
 
+
+/* ---- 拓客/邀请视图（referral-qr）---- */
+.referral-view{max-width:520px;margin:0 auto}
+.referral-card{background:var(--paper);border:1px solid var(--line);border-radius:14px;padding:28px 24px;text-align:center}
+.referral-card h2{margin-bottom:4px}
+.qr-wrap{display:flex;justify-content:center;padding:16px;margin:16px auto;max-width:280px;background:#fff;border:1px solid var(--line);border-radius:12px}
+.qr-wrap canvas{max-width:100%;height:auto;image-rendering:pixelated}
+.qr-link{word-break:break-all;margin:12px 0 16px}
+.qr-link code{background:var(--green-soft,#e5efeb);color:var(--green);padding:6px 10px;border-radius:6px;font-size:.85rem}

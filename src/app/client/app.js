@@ -1,4 +1,5 @@
 import { createApp, ref, reactive, computed, onMounted, nextTick } from '/vendor/vue.esm-browser.prod.js';
+import { encodeQr, drawQrToCanvas } from '/qr.ts';
 
 createApp({
   setup() {
@@ -10,6 +11,13 @@ createApp({
     const authError = ref('');
     const logoutUnconfirmed = ref(false);
     const loginForm = reactive({ username: '', password: '' });
+    const registerForm = reactive({ name: '', username: '', password: '', passwordConfirm: '' });
+    const registerMode = ref(false);
+    const refCodeFromUrl = ref('');
+    const referral = reactive({ code: '', link: '' });
+    const referralError = ref('');
+    const referralToast = ref('');
+    const qrCanvas = ref(null);
     const portfolio = ref(null);
     const calendar = ref([]);
     const clients = ref([]);
@@ -70,7 +78,7 @@ createApp({
     const store = computed(() => bootstrap.value.stores.find(item => item.id === session.value?.storeId));
     const roleTitle = computed(() => ({ client: '我的', manager: '门店', hq: '总部' })[role.value]);
     const roleLabel = computed(() => ({ client: '客户', manager: '店长', hq: '总部' })[role.value]);
-    const title = computed(() => ({ today: '今日策略', calendar: '战绩日历', workspace: roleTitle.value })[view.value]);
+    const title = computed(() => ({ today: '今日策略', calendar: '战绩日历', workspace: roleTitle.value, referral: role.value === 'manager' ? '拓客二维码' : '邀请好友' })[view.value]);
     const ownClients = computed(() => clients.value.filter(item => item.managerId === session.value?.managerId));
     const adjustmentClient = computed(() => ownClients.value.find(item => item.id === adjustmentForm.clientId));
     // Use cents for the preview; the server independently validates and commits the ledger transaction.
@@ -301,11 +309,12 @@ createApp({
     function syncHash() {
       if (typeof window === 'undefined' || !window.location) return;
       const h = (window.location.hash || '').replace(/^#/, '');
-      if (['today', 'calendar', 'workspace'].includes(h)) {
+      if (['today', 'calendar', 'workspace', 'referral'].includes(h)) {
         if (role.value === 'manager' && (h === 'today' || h === 'calendar')) {
           view.value = 'workspace';
         } else {
           view.value = h;
+          if (h === 'referral') loadReferral();
         }
       }
     }
@@ -314,6 +323,7 @@ createApp({
       if (typeof window !== 'undefined' && window.location) {
         window.location.hash = target;
       }
+      if (target === 'referral') loadReferral();
     }
     function startPolling() {
       stopPolling();
@@ -417,6 +427,68 @@ createApp({
           document.getElementById('login-error')?.scrollIntoView({ block: 'nearest' });
         }
       } finally { credentials.password = ''; authBusy.value = false; }
+    }
+    async function register() {
+      if (authBusy.value || !refCodeFromUrl.value) return;
+      if (registerForm.password !== registerForm.passwordConfirm) {
+        authError.value = '两次输入的密码不一致，请重新输入。';
+        return;
+      }
+      clearSession(); authBusy.value = true; authError.value = '';
+      const epoch = sessionEpoch;
+      try {
+        const actor = await api('/api/auth/register', {
+          refCode: refCodeFromUrl.value,
+          username: registerForm.username.trim(),
+          password: registerForm.password,
+          name: registerForm.name.trim() || registerForm.username.trim(),
+        });
+        if (epoch !== sessionEpoch) return;
+        acceptSession(actor);
+        await loadWorkspace();
+      } catch (failure) {
+        if (!failure.stale && !session.value) {
+          authError.value = failure.message || '注册失败，请检查网络后重试。';
+          await nextTick();
+          document.getElementById('login-error')?.focus({ preventScroll: true });
+        }
+      } finally { registerForm.password = ''; registerForm.passwordConfirm = ''; authBusy.value = false; }
+    }
+    async function loadReferral() {
+      if (!session.value || (role.value !== 'manager' && role.value !== 'client')) return;
+      referralError.value = ''; referral.code = ''; referral.link = ''; referralToast.value = '';
+      try {
+        const mine = await api('/api/referrals/me');
+        const base = `${window.location.protocol}//${window.location.host}/`;
+        referral.code = mine.code;
+        referral.link = `${base}?ref=${mine.code}`;
+        await nextTick();
+        if (qrCanvas.value) {
+          try { drawQrToCanvas(qrCanvas.value, encodeQr(referral.link)); }
+          catch { referralError.value = '二维码生成失败，可复制文字链接使用。'; }
+        }
+      } catch (failure) {
+        if (!failure.stale) referralError.value = failure.message || '获取推广码失败，请稍后重试。';
+      }
+    }
+    async function copyReferralLink() {
+      referralToast.value = '';
+      try {
+        await navigator.clipboard.writeText(referral.link);
+        referralToast.value = '链接已复制，快去分享吧。';
+      } catch {
+        referralToast.value = '复制失败，请长按链接手动复制。';
+      }
+    }
+    async function recordReferralShare() {
+      if (pending.value) return;
+      pending.value = 'referral-share'; referralToast.value = '';
+      try {
+        await api('/api/referrals/share', {});
+        referralToast.value = '已记录一次分享。';
+      } catch (failure) {
+        if (!failure.stale) referralToast.value = failure.message || '记录失败，请稍后重试。';
+      } finally { pending.value = ''; }
     }
     async function logout() {
       if (authBusy.value || pending.value) return;
@@ -809,8 +881,16 @@ createApp({
       if (typeof window !== 'undefined' && window.addEventListener) {
         window.addEventListener('hashchange', syncHash);
       }
+      // 扫码注册入口：URL 带 ?ref= 且未登录时切换到注册表单
+      if (typeof window !== 'undefined' && window.location) {
+        const refParam = new URLSearchParams(window.location.search).get('ref');
+        if (refParam && /^[0-9a-zA-Z]{20,24}$/.test(refParam)) {
+          refCodeFromUrl.value = refParam;
+          registerMode.value = true;
+        }
+      }
       initialize();
     });
-    return { view, bootstrap, session, authChecking, authBusy, authError, logoutUnconfirmed, loginForm, role, roleTitle, roleLabel, manager, store, client, ownClients, portfolio, calendar, clients, orders, bills, ledger, audits, attributionSummary, attributionTotals, summary, storedCount, loading, scopeLoading, error, scopeError, formError, failedForm, pending, toast, day, dayDialog, orderDialog, followDialog, customDialog, portfolioDialog, followForm, followTotalCost, customForm, customQuantity, customSelectedCode, customTotalCost, customGroupType, toggleBall, selectAllBalls, clearBalls, setCustomMode, formatOrderCode, orderModeTag, isEditingPortfolio, orderForm, adjustmentForm, adjustmentUnconfirmed, adjustmentClient, adjustmentBalance, adjustmentInvalid, startAdjustment, resultForm, portfolioForm, storeForm, managerForm, clientForm, management, hqDate, title, hitCount, verifiedCount, calendarPadding, billMap, money, shortDate, dateTime, clientName, managerName, storeName, statusLabel, voucherLabel, syncing, syncMsg, syncOfficialLottery, initialize, login, logout, loadScope, loadGlobal, openDay, openOrder, openFollow, submitFollowOrder, openCustomOrder, randomCustomCode, submitCustomOrder, getOrderResolution, openPortfolioDialog, editPortfolioToday, savePortfolioModal, openManagement, closeOrder, saveOrder, claimVoucher, saveAdjustment, saveResolution, savePortfolio, saveStore, saveManager, saveClient, switchView, syncHash };
+    return { view, bootstrap, session, authChecking, authBusy, authError, logoutUnconfirmed, loginForm, registerForm, registerMode, referral, referralError, referralToast, qrCanvas, role, roleTitle, roleLabel, manager, store, client, ownClients, portfolio, calendar, clients, orders, bills, ledger, audits, attributionSummary, attributionTotals, summary, storedCount, loading, scopeLoading, error, scopeError, formError, failedForm, pending, toast, day, dayDialog, orderDialog, followDialog, customDialog, portfolioDialog, followForm, followTotalCost, customForm, customQuantity, customSelectedCode, customTotalCost, customGroupType, toggleBall, selectAllBalls, clearBalls, setCustomMode, formatOrderCode, orderModeTag, isEditingPortfolio, orderForm, adjustmentForm, adjustmentUnconfirmed, adjustmentClient, adjustmentBalance, adjustmentInvalid, startAdjustment, resultForm, portfolioForm, storeForm, managerForm, clientForm, management, hqDate, title, hitCount, verifiedCount, calendarPadding, billMap, money, shortDate, dateTime, clientName, managerName, storeName, statusLabel, voucherLabel, syncing, syncMsg, syncOfficialLottery, initialize, login, register, copyReferralLink, recordReferralShare, logout, loadScope, loadGlobal, openDay, openOrder, openFollow, submitFollowOrder, openCustomOrder, randomCustomCode, submitCustomOrder, getOrderResolution, openPortfolioDialog, editPortfolioToday, savePortfolioModal, openManagement, closeOrder, saveOrder, claimVoucher, saveAdjustment, saveResolution, savePortfolio, saveStore, saveManager, saveClient, switchView, syncHash };
   },
 }).mount('#app');

@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "plt-erp",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["src/app/server.ts"],
+      "port": 19888
+    }
+  ]
+}

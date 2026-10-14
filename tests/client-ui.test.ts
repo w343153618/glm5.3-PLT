@@ -22,7 +22,7 @@ interface State {
   startAdjustment(client: Client, direction: string): Promise<void>;
   saveAdjustment(): Promise<void> | undefined;
 }
-const source = readFileSync(new URL('../src/app/client/app.js', import.meta.url), 'utf8').replace(/^import[^\n]*\n/, '');
+const source = readFileSync(new URL('../src/app/client/app.js', import.meta.url), 'utf8').replace(/^import[^\n]*\n/gm, '');
 const page = readFileSync(new URL('../src/app/client/index.html', import.meta.url), 'utf8');
 const template = page.match(/<div id="app" v-cloak>([\s\S]*)<\/div>\s*<noscript>/)![1]!;
 const password = 'ui-test-password-42';
