@@ -24,6 +24,8 @@ export type BetMode = z.infer<typeof BetModeSchema>;
 export const OrderCodeSchema = z.string()
   .regex(/^([0-9]{3}|[0-9]{1,10}\|[0-9]{1,10}\|[0-9]{1,10}|(G3:)?[0-9]{1,10}\|[0-9]{1,10}|[0-9]{4,10})$/, '必须为 3 位数字或有效的排列三选号组合');
 
+export const PhotoMimeSchema = z.enum(['image/jpeg', 'image/png']);
+
 export const OrderSlipSchema = z.strictObject({
   id: z.uuid(),
   storeId: z.uuid(),
@@ -35,6 +37,8 @@ export const OrderSlipSchema = z.strictObject({
   quantity: PositiveQuantitySchema,
   totalAmount: MonetaryAmountSchema,
   voucherStatus: VoucherStatusSchema.default('StoredInShop'),
+  photoToken: z.string().regex(/^[0-9a-f]{64}$/).optional(),
+  photoMime: PhotoMimeSchema.optional(),
   createdAt: z.date(),
 });
 

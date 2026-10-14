@@ -4,6 +4,7 @@ export {
   BetModeSchema,
   OutcomeStatusSchema,
   VoucherStatusSchema,
+  PhotoMimeSchema,
   StrategyPortfolioSchema,
   OrderSlipSchema,
   ResolutionEventSchema,
