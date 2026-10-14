@@ -9,6 +9,7 @@
 空白库且 `DEMO_SEED=false` 时只有总部账号：不会虚构客户归属。初始化流程是总部建立首家门店和首位店长 → 重启以初始化店长账号 → 店长建立首个客户档案 → 重启以初始化客户账号；各次启动保持同一 AUTH_BOOTSTRAP_PASSWORD 配置。已有店长账号决定客户初始化归属，后续增加其他门店不会改变它。当前没有更多账号开通、重新绑定或密码重置页面。已有数据的自动绑定仅适用于本次三账号演示初始化；面向真实人员上线前需要明确账户归属并建立账号管理流程。
 
 - `POST /api/auth/login`：仅接受 `{ username, password }`，返回该账号的角色与归属；传入 `role`、`clientId`、`managerId` 或 `subjectId` 等身份选择字段会拒绝。
+- `POST /api/auth/register`（公开）：扫码自助注册。接受 `{ refCode, username, password, name }`，推广码为店长专属 base62 短码（managerId 可逆编码）。校验通过后创建客户档案（归属该店长、写入归属审计 note「扫码注册」）、创建 Client 账号并自动签发会话。用户名须 3-30 位字母数字且全局唯一（重复 409）；密码至少 8 位。每 IP 15 分钟最多 5 次注册（429）。老客户分享的二维码永远指向其所属店长——裂变不改变归属关系。
 - `GET /api/auth/me`：恢复当前会话。
 - `POST /api/auth/logout`：撤销当前会话、清除 Cookie；重复退出安全。
 - 原 `/api/demo/identities` 与 `/api/demo/session` 已移除。

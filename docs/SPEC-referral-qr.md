@@ -13,15 +13,15 @@
 3. 作为总部管理员，我在网页后台按店长、按日期查：分享了几次、多少人扫码注册。
 
 **验收标准（具体可测）：**
-- [ ] `GET /api/referrals/me` 返回当前登录角色的推广码（店长返回自己的，客户返回其 managerId 的推广码）——客户端永远拿不到非本人所属店长的推广码
-- [ ] 未登录访问 `/?ref=xxx` 时注册页可用；登录状态访问则直接进工作台（ref 参数忽略）
-- [ ] `POST /api/auth/register`（公开路由）：body 带 `{ refCode, username, password, name? }`；校验 refCode 有效；创建 client 档案（归属 refCode 对应店长）+ auth_account（Client 角色，subjectId=新 client.id）；返回登录会话（自动登录）
-- [ ] 用户名唯一性校验，重复返回 409；用户名规则 3-30 位字母数字（与现有 user 账号风格一致）
-- [ ] 分享统计：每次生成/展示推广码记一次 `share_event`（追加式审计，含 date、managerId、sharerRole、sharerClientId?）
-- [ ] 注册成功自动写一条 `client_attribution_audit`（note 注明「扫码注册」），复用现有归属审计，总部 `GET /api/hq/attribution-audits` 立刻可见
-- [ ] `GET /api/hq/referral-stats`（hq 专属）：按 managerId×date 聚合 share 次数与注册数，支持 date/managerId 过滤
-- [ ] 权限矩阵：`referrals/me` → client+manager；`auth/register` → 公开；`hq/referral-stats` → hq。所有新路由加入 rolePolicies 显式登记，未登记默认拒绝
-- [ ] 注册页在手机端可用（店长/客户账号登录页也有入口链接跳转）
+- [x] `GET /api/referrals/me` 返回当前登录角色的推广码（店长返回自己的，客户返回其 managerId 的推广码）——客户端永远拿不到非本人所属店长的推广码
+- [x] 未登录访问 `/?ref=xxx` 时注册页可用；登录状态访问则直接进工作台（ref 参数忽略）
+- [x] `POST /api/auth/register`（公开路由）：body 带 `{ refCode, username, password, name? }`；校验 refCode 有效；创建 client 档案（归属 refCode 对应店长）+ auth_account（Client 角色，subjectId=新 client.id）；返回登录会话（自动登录）
+- [x] 用户名唯一性校验，重复返回 409；用户名规则 3-30 位字母数字（与现有 user 账号风格一致）
+- [x] 分享统计：每次生成/展示推广码记一次 `share_event`（追加式审计，含 date、managerId、sharerRole、sharerClientId?）
+- [x] 注册成功自动写一条 `client_attribution_audit`（note 注明「扫码注册」），复用现有归属审计，总部 `GET /api/hq/attribution-audits` 立刻可见
+- [x] `GET /api/hq/referral-stats`（hq 专属）：按 managerId×date 聚合 share 次数与注册数，支持 date/managerId 过滤
+- [x] 权限矩阵：`referrals/me` → client+manager；`auth/register` → 公开；`hq/referral-stats` → hq。所有新路由加入 rolePolicies 显式登记，未登记默认拒绝
+- [x] 注册页在手机端可用（店长/客户账号登录页也有入口链接跳转）
 
 ## Tech Stack
 

@@ -28,6 +28,7 @@ createApp({
     const audits = ref([]);
     const attributionSummary = ref([]);
     const attributionTotals = ref([]);
+    const referralStats = ref([]);
     const summary = ref(null);
     const loading = ref(true);
     const scopeLoading = ref(false);
@@ -363,13 +364,14 @@ createApp({
           orders.value = newest(orders.value); bills.value = [...bills.value].sort((a, b) => b.date.localeCompare(a.date)); ledger.value = latestLedger(ledger.value);
         } else {
           const query = hqDate.value ? `?date=${encodeURIComponent(hqDate.value)}` : '';
-          const [attribution, entries, hqOrders] = await Promise.all([
+          const [attribution, entries, hqOrders, referralStatsRows] = await Promise.all([
             api(`/api/hq/attribution-audits${query}`),
             api(`/api/hq/reconciliations${query}`),
             api(`/api/hq/orders${query}`),
+            api(`/api/hq/referral-stats${query}`),
           ]);
           if (request !== scopeRequest) return;
-          audits.value = newest(attribution.audits); attributionSummary.value = attribution.summary; attributionTotals.value = attribution.totals; ledger.value = latestLedger(entries); orders.value = newest(hqOrders);
+          audits.value = newest(attribution.audits); attributionSummary.value = attribution.summary; attributionTotals.value = attribution.totals; ledger.value = latestLedger(entries); orders.value = newest(hqOrders); referralStats.value = referralStatsRows;
         }
       } catch (failure) {
         if (request === scopeRequest && !silent) scopeError.value = failure.message || '数据读取失败，请重试。';
@@ -891,6 +893,6 @@ createApp({
       }
       initialize();
     });
-    return { view, bootstrap, session, authChecking, authBusy, authError, logoutUnconfirmed, loginForm, registerForm, registerMode, referral, referralError, referralToast, qrCanvas, role, roleTitle, roleLabel, manager, store, client, ownClients, portfolio, calendar, clients, orders, bills, ledger, audits, attributionSummary, attributionTotals, summary, storedCount, loading, scopeLoading, error, scopeError, formError, failedForm, pending, toast, day, dayDialog, orderDialog, followDialog, customDialog, portfolioDialog, followForm, followTotalCost, customForm, customQuantity, customSelectedCode, customTotalCost, customGroupType, toggleBall, selectAllBalls, clearBalls, setCustomMode, formatOrderCode, orderModeTag, isEditingPortfolio, orderForm, adjustmentForm, adjustmentUnconfirmed, adjustmentClient, adjustmentBalance, adjustmentInvalid, startAdjustment, resultForm, portfolioForm, storeForm, managerForm, clientForm, management, hqDate, title, hitCount, verifiedCount, calendarPadding, billMap, money, shortDate, dateTime, clientName, managerName, storeName, statusLabel, voucherLabel, syncing, syncMsg, syncOfficialLottery, initialize, login, register, copyReferralLink, recordReferralShare, logout, loadScope, loadGlobal, openDay, openOrder, openFollow, submitFollowOrder, openCustomOrder, randomCustomCode, submitCustomOrder, getOrderResolution, openPortfolioDialog, editPortfolioToday, savePortfolioModal, openManagement, closeOrder, saveOrder, claimVoucher, saveAdjustment, saveResolution, savePortfolio, saveStore, saveManager, saveClient, switchView, syncHash };
+    return { view, bootstrap, session, authChecking, authBusy, authError, logoutUnconfirmed, loginForm, registerForm, registerMode, referral, referralError, referralToast, qrCanvas, role, roleTitle, roleLabel, manager, store, client, ownClients, portfolio, calendar, clients, orders, bills, ledger, audits, attributionSummary, attributionTotals, referralStats, summary, storedCount, loading, scopeLoading, error, scopeError, formError, failedForm, pending, toast, day, dayDialog, orderDialog, followDialog, customDialog, portfolioDialog, followForm, followTotalCost, customForm, customQuantity, customSelectedCode, customTotalCost, customGroupType, toggleBall, selectAllBalls, clearBalls, setCustomMode, formatOrderCode, orderModeTag, isEditingPortfolio, orderForm, adjustmentForm, adjustmentUnconfirmed, adjustmentClient, adjustmentBalance, adjustmentInvalid, startAdjustment, resultForm, portfolioForm, storeForm, managerForm, clientForm, management, hqDate, title, hitCount, verifiedCount, calendarPadding, billMap, money, shortDate, dateTime, clientName, managerName, storeName, statusLabel, voucherLabel, syncing, syncMsg, syncOfficialLottery, initialize, login, register, copyReferralLink, recordReferralShare, logout, loadScope, loadGlobal, openDay, openOrder, openFollow, submitFollowOrder, openCustomOrder, randomCustomCode, submitCustomOrder, getOrderResolution, openPortfolioDialog, editPortfolioToday, savePortfolioModal, openManagement, closeOrder, saveOrder, claimVoucher, saveAdjustment, saveResolution, savePortfolio, saveStore, saveManager, saveClient, switchView, syncHash };
   },
 }).mount('#app');
