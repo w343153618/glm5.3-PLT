@@ -110,7 +110,7 @@ createApp({
     const adjustmentForm = reactive({ clientId: '', date: '', direction: 'ADJUST_IN', amount: '', note: '' });
     const adjustmentUnconfirmed = ref(false);
     const resultForm = reactive({ date: '', settlementCode: '', quotaPerUnit: 1040 });
-    const portfolioForm = reactive({ date: '', combos: [{ code: '', weight: 33, note: '' }, { code: '', weight: 33, note: '' }, { code: '', weight: 34, note: '' }] });
+    const portfolioForm = reactive({ date: '', note: '', combos: [{ code: '', weight: 33, note: '' }, { code: '', weight: 33, note: '' }, { code: '', weight: 34, note: '' }] });
     const isEditingPortfolio = ref(false);
     const storeForm = reactive({ name: '', address: '' });
     const managerForm = reactive({ storeId: '', name: '' });
@@ -358,7 +358,7 @@ createApp({
       Object.assign(storeForm, { name: '', address: '' });
       Object.assign(managerForm, { storeId: '', name: '' });
       Object.assign(resultForm, { date: '', settlementCode: '', quotaPerUnit: 1040 });
-      Object.assign(portfolioForm, { date: '', combos: [{ code: '', weight: 33, note: '' }, { code: '', weight: 33, note: '' }, { code: '', weight: 34, note: '' }] });
+      Object.assign(portfolioForm, { date: '', note: '', combos: [{ code: '', weight: 33, note: '' }, { code: '', weight: 33, note: '' }, { code: '', weight: 34, note: '' }] });
       loginForm.username = ''; loginForm.password = '';
     }
     function syncHash() {
@@ -1094,9 +1094,11 @@ createApp({
       failedForm.value = '';
       if (forEdit && portfolio.value) {
         portfolioForm.date = portfolio.value.date;
+        portfolioForm.note = portfolio.value.note || '';
         portfolioForm.combos = portfolio.value.combos.map(c => ({ code: c.code, weight: c.weight, note: c.note || '' }));
       } else {
         portfolioForm.date = bootstrap.value.today;
+        portfolioForm.note = '';
         portfolioForm.combos = [
           { code: '', weight: 33, note: '建议均权配置 / 风险均衡' },
           { code: '', weight: 33, note: '建议均权配置 / 风险均衡' },
@@ -1112,6 +1114,7 @@ createApp({
       return perform('portfolio-modal', async () => {
         const payload = {
           date: portfolioForm.date,
+          note: portfolioForm.note.trim() || undefined,
           combos: portfolioForm.combos.map(c => ({
             code: String(c.code).trim(),
             weight: Number(c.weight),
@@ -1140,7 +1143,7 @@ createApp({
     }
     function savePortfolio() {
       return perform('portfolio', async () => {
-        const payload = { date: portfolioForm.date, combos: portfolioForm.combos.map(combo => ({ ...combo, weight: Number(combo.weight) })) };
+        const payload = { date: portfolioForm.date, note: portfolioForm.note.trim() || undefined, combos: portfolioForm.combos.map(combo => ({ ...combo, weight: Number(combo.weight) })) };
         if (isEditingPortfolio.value) {
           await api(`/api/portfolios/${portfolioForm.date}`, payload, 'PUT');
           notify('当日策略已更新纠错！客户端已实时同步。');

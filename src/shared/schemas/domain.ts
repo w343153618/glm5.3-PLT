@@ -15,6 +15,7 @@ export const StrategyPortfolioSchema = z.strictObject({
     weight: z.number().min(1).max(100),
     note: z.string().optional(),
   })).length(3, '每日策略必须且仅包含 3 组推荐标的'),
+  note: z.string().trim().min(1).max(120, '推荐理由不能超过 120 个字符').optional(),
   createdAt: z.date(),
 });
 

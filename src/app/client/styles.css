@@ -233,3 +233,7 @@
 .wechat-bind-form.manager-wechat h2{margin:0 0 2px;font-size:1rem;color:#176458}
 .wechat-bind-form.manager-wechat input{width:100%}
 .wechat-toast{color:#176458;font-size:.8rem}
+
+/* ---- strategy-note：方案推荐理由 ---- */
+.portfolio-note{margin:0 0 4px;padding:8px 12px;border:1px solid var(--line);border-radius:8px;
+  background:rgba(23,100,88,.06);color:#176458;font-size:.88rem}
