@@ -32,7 +32,7 @@ export function createDatabase(filename = ':memory:'): AppDatabase {
   const set = sqlite.prepare(`INSERT INTO records (kind, id, body) VALUES (?, ?, ?)
     ON CONFLICT(kind, id) DO UPDATE SET body = excluded.body`);
   // Static table names only; audit records have no update or delete path.
-  const journals = new Map(['reconciliation_ledger', 'client_attribution_audit', 'voucher_audit'].map(kind => {
+  const journals = new Map(['reconciliation_ledger', 'client_attribution_audit', 'voucher_audit', 'share_event'].map(kind => {
     sqlite.exec(`CREATE TABLE IF NOT EXISTS ${kind} (id TEXT PRIMARY KEY, body TEXT NOT NULL) STRICT;
       CREATE TRIGGER IF NOT EXISTS ${kind}_no_update BEFORE UPDATE ON ${kind}
         BEGIN SELECT RAISE(ABORT, 'Audit records are append-only'); END;
