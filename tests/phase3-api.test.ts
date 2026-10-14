@@ -206,6 +206,7 @@ it('rejects cross-store, forged operators, future records and removed demo switc
     expect((await app.inject({ url: '/api/bootstrap', headers })).statusCode).toBe(401);
     expect((await app.inject({ url: '/api/bootstrap', headers: { cookie: next } })).statusCode).toBe(200);
     expect((await app.inject({ method: 'POST', url: '/api/orders/follow', payload: {} })).statusCode).toBe(404);
-    expect((await app.inject({ method: 'POST', url: '/api/referrals/share', payload: {} })).statusCode).toBe(404);
+    // referral 路由已上线：未登录访问应被鉴权拒绝（401），而非路由不存在
+    expect((await app.inject({ method: 'POST', url: '/api/referrals/share', payload: {} })).statusCode).toBe(401);
   } finally { await app.close(); }
 });

@@ -13,8 +13,10 @@ import { createStrategyModule } from '../modules/strategy/index.ts';
 import { createRegistryModule } from '../modules/registry/index.ts';
 import { seedDemo } from './seed.ts';
 import { createReconciliationModule } from '../modules/reconciliation/index.ts';
+import { createReferralModule } from '../modules/referral/index.ts';
 import { ReconciliationAdjustmentSchema } from '../shared/schemas/reconciliation.ts';
 import { VoucherStatusSchema } from '../shared/schemas/domain.ts';
+import { RegisterInputSchema } from '../shared/schemas/referral.ts';
 import { createAccess, type Actor } from './access.ts';
 import { syncOfficialResolutions } from '../modules/lottery-crawler/index.ts';
 
@@ -40,8 +42,11 @@ const rolePolicies = new Map<string, readonly Actor['role'][]>([
   ['GET /api/hq/attribution-audits', ['hq']],
   ['GET /api/hq/reconciliations', ['hq']],
   ['GET /api/hq/orders', ['hq']],
+  ['GET /api/referrals/me', ['client', 'manager']],
+  ['POST /api/referrals/share', ['client', 'manager']],
+  ['GET /api/hq/referral-stats', ['hq']],
 ]);
-const publicRoutes = new Set(['GET /api/health', 'POST /api/auth/login', 'POST /api/auth/logout']);
+const publicRoutes = new Set(['GET /api/health', 'POST /api/auth/login', 'POST /api/auth/logout', 'POST /api/auth/register', 'GET /api/referrals/code/:code']);
 
 export function businessDate(now = new Date()): string {
   return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit' }).format(now);
@@ -65,6 +70,7 @@ export async function buildApp(options: AppOptions = {}) {
   const strategy = createStrategyModule(db);
   const registry = createRegistryModule(db, stores, strategy);
   const reconciliation = createReconciliationModule(db, stores);
+  const referral = createReferralModule(db);
   let access: Awaited<ReturnType<typeof createAccess>>;
   try {
     if (options.seed !== false) seedDemo(db, stores, strategy, registry, currentDate());
@@ -163,6 +169,47 @@ export async function buildApp(options: AppOptions = {}) {
   app.get('/api/health', async () => ({ status: 'ok' }));
   app.post('/api/auth/login', async (request, reply) => access.login(request, reply));
   app.post('/api/auth/logout', async (request, reply) => access.logout(request, reply));
+  app.post('/api/auth/register', async (request, reply) => {
+    const input = RegisterInputSchema.parse(request.body);
+    return reply.code(201).send(await access.register(request, reply, input, referral.resolveCode, currentDate));
+  });
+  app.get<{ Params: { code: string } }>('/api/referrals/code/:code', async (request) => {
+    try {
+      referral.resolveCode(request.params.code);
+      return { valid: true };
+    } catch {
+      return { valid: false };
+    }
+  });
+  app.get('/api/referrals/me', async (request) => {
+    const actor = access.actor(request);
+    if (actor.role !== 'manager' && actor.role !== 'client') throw new DomainError('仅店长或客户可获取推广码', 403);
+    if (actor.role === 'manager' && !actor.managerId) throw new DomainError('账号未绑定店长，无法获取推广码', 403);
+    if (actor.role === 'client' && !actor.managerId) throw new DomainError('账号尚未归属店长，请联系店长处理', 403);
+    // 裂变规则：客户拿到的永远是其所属店长的推广码
+    const managerId = actor.managerId!;
+    return { managerId, code: referral.getOrCreateCode(managerId), role: actor.role };
+  });
+  app.post('/api/referrals/share', async (request, reply) => {
+    const actor = access.actor(request);
+    if (actor.role !== 'manager' && actor.role !== 'client') throw new DomainError('仅店长或客户可记录分享', 403);
+    if (!actor.managerId) throw new DomainError('账号尚未归属店长', 403);
+    const event = referral.recordShare({
+      managerId: actor.managerId,
+      sharerRole: actor.role,
+      ...(actor.role === 'client' && actor.clientId ? { sharerClientId: actor.clientId } : {}),
+      date: currentDate(),
+    });
+    return reply.code(201).send(event);
+  });
+  app.get('/api/hq/referral-stats', async (request) => {
+    access.hq(request);
+    const query = z.strictObject({ managerId: z.uuid().optional(), date: z.iso.date().optional() }).parse(request.query);
+    return referral.stats({
+      ...(query.managerId !== undefined ? { managerId: query.managerId } : {}),
+      ...(query.date !== undefined ? { date: query.date } : {}),
+    });
+  });
   app.get('/api/auth/me', async request => access.actor(request));
   app.get('/api/bootstrap', async request => {
     const actor = access.actor(request);

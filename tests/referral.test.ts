@@ -173,3 +173,98 @@ describe('access.register()', () => {
     await expect(register({ refCode, username: 'rate6', password: 'Abcd1234' })).rejects.toMatchObject({ statusCode: 429 });
   });
 });
+
+describe('referral API routes', () => {
+  async function apiFixture() {
+    const { buildApp } = await import('../src/app/app.ts');
+    const { authOptions, login } = await import('./helpers/auth.ts');
+    const app = await buildApp({ databasePath: ':memory:', today: '2026-10-14', seed: true, autoSync: false, logger: false, ...authOptions });
+    return { app, login: (username: 'admin' | 'dianzhang' | 'user') => login(app, username) };
+  }
+
+  it('serves the referral code validity check publicly without leaking manager data', async () => {
+    const { app, login } = await apiFixture();
+    try {
+      const manager = await login('dianzhang');
+      const mine = await app.inject({ url: '/api/referrals/me', headers: { cookie: manager.cookie } });
+      expect(mine.statusCode).toBe(200);
+      const { code } = mine.json();
+      const valid = await app.inject({ url: `/api/referrals/code/${code}` });
+      expect(valid.statusCode).toBe(200);
+      expect(valid.json()).toEqual({ valid: true });
+      const invalid = await app.inject({ url: '/api/referrals/code/not-a-code' });
+      expect(invalid.json()).toEqual({ valid: false });
+    } finally { await app.close(); }
+  });
+
+  it('completes scan-to-register end to end with attribution and auto login', async () => {
+    const { app, login } = await apiFixture();
+    try {
+      const manager = await login('dianzhang');
+      const { code } = (await app.inject({ url: '/api/referrals/me', headers: { cookie: manager.cookie } })).json();
+      const registered = await app.inject({
+        method: 'POST', url: '/api/auth/register',
+        payload: { refCode: code, username: 'neighbor01', password: 'Passw0rd1', name: '张邻居' },
+      });
+      expect(registered.statusCode).toBe(201);
+      const actor = registered.json();
+      expect(actor).toMatchObject({ role: 'client', username: 'neighbor01', managerId: manager.actor.managerId });
+      // 自动登录：新会话可直接访问受保护接口
+      const cookie = String(registered.headers['set-cookie']).split(';')[0]!;
+      const me = await app.inject({ url: '/api/auth/me', headers: { cookie } });
+      expect(me.statusCode).toBe(200);
+      expect(me.json().role).toBe('client');
+      // 注册出现在 hq 统计中
+      const admin = await login('admin');
+      const stats = await app.inject({ url: '/api/hq/referral-stats', headers: { cookie: admin.cookie } });
+      expect(stats.statusCode).toBe(200);
+      expect(stats.json()).toEqual([
+        expect.objectContaining({ managerId: manager.actor.managerId, date: '2026-10-14', registerCount: 1 }),
+      ]);
+    } finally { await app.close(); }
+  });
+
+  it('returns the owning manager code for a client (fission never reattributes)', async () => {
+    const { app, login } = await apiFixture();
+    try {
+      const manager = await login('dianzhang');
+      const managerCode = (await app.inject({ url: '/api/referrals/me', headers: { cookie: manager.cookie } })).json().code;
+      const client = await login('user');
+      const mine = await app.inject({ url: '/api/referrals/me', headers: { cookie: client.cookie } });
+      expect(mine.statusCode).toBe(200);
+      // 客户视角：二维码与其店长的相同
+      expect(mine.json()).toEqual({ managerId: client.actor.managerId, code: managerCode, role: 'client' });
+    } finally { await app.close(); }
+  });
+
+  it('enforces the role matrix on referral routes', async () => {
+    const { app, login } = await apiFixture();
+    try {
+      const client = await login('user');
+      // 未登录
+      expect((await app.inject({ url: '/api/referrals/me' })).statusCode).toBe(401);
+      expect((await app.inject({ method: 'POST', url: '/api/referrals/share', payload: {} })).statusCode).toBe(401);
+      // 客户不能访问 hq 统计
+      expect((await app.inject({ url: '/api/hq/referral-stats', headers: { cookie: client.cookie } })).statusCode).toBe(403);
+      // 店长可以记录分享
+      const manager = await login('dianzhang');
+      const shared = await app.inject({ method: 'POST', url: '/api/referrals/share', headers: { cookie: manager.cookie } });
+      expect(shared.statusCode).toBe(201);
+      expect(shared.json()).toMatchObject({ sharerRole: 'manager', date: '2026-10-14' });
+      // admin（hq）不能访问 referrals/me
+      const admin = await login('admin');
+      expect((await app.inject({ url: '/api/referrals/me', headers: { cookie: admin.cookie } })).statusCode).toBe(403);
+    } finally { await app.close(); }
+  });
+
+  it('rejects registration with a used username via HTTP with 409', async () => {
+    const { app, login } = await apiFixture();
+    try {
+      const manager = await login('dianzhang');
+      const { code } = (await app.inject({ url: '/api/referrals/me', headers: { cookie: manager.cookie } })).json();
+      const payload = { refCode: code, username: 'taken01', password: 'Passw0rd1', name: '甲' };
+      expect((await app.inject({ method: 'POST', url: '/api/auth/register', payload })).statusCode).toBe(201);
+      expect((await app.inject({ method: 'POST', url: '/api/auth/register', payload })).statusCode).toBe(409);
+    } finally { await app.close(); }
+  });
+});
