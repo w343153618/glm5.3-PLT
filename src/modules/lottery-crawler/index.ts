@@ -9,6 +9,29 @@ export interface OfficialLotteryDraw {
   quotaPerUnit: number;
 }
 
+/** 下期开奖时间（huiniao next_open_time，北京时间字符串）。获取失败返回 null（前端隐藏倒计时）。 */
+export async function fetchNextDrawTime(fetchImpl = fetch): Promise<string | null> {
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 6000);
+    const res = await fetchImpl('http://api.huiniao.top/interface/home/lotteryHistory?type=pls&page=1&limit=1', {
+      signal: controller.signal,
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)',
+        'Accept': 'application/json',
+      },
+    });
+    clearTimeout(timeout);
+    if (!res.ok) return null;
+    const json = await res.json() as { data?: { data?: { list?: Array<{ next_open_time?: unknown }> } } };
+    const next = json.data?.data?.list?.[0]?.next_open_time;
+    if (typeof next === 'string' && /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(next)) return next;
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 const HuiniaoItemSchema = z.object({
   code: z.string(),
   day: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),

@@ -275,3 +275,66 @@ it('supports client UI group betting mode switching and dynamic group type detec
   expect(resDirect.isHit).toBe(false);
   expect(resDirect.isGroup).toBe(false);
 });
+
+it('pick-assist: form card, repeat hint, and smart random follow the spec', async () => {
+  const browser = await harness();
+  await browser.login('user');
+  const state = browser.state as any;
+  state.openCustomOrder();
+
+  // 1. 形态解说卡：豹子 / 组三 / 组六
+  state.customForm.selectedCode = '111';
+  expect(state.customFormCard.value.form).toBe('豹子');
+  expect(state.customFormCard.value.groupQuota).toBeUndefined();
+  state.customForm.selectedCode = '112';
+  expect(state.customFormCard.value.form).toBe('组三形态');
+  expect(state.customFormCard.value.groupQuota).toBe(346);
+  state.customForm.selectedCode = '123';
+  expect(state.customFormCard.value.form).toBe('组六形态');
+  expect(state.customFormCard.value.groupQuota).toBe(173);
+  expect(state.customFormCard.value.sum).toBe(6);
+
+  // 2. 近期重号提示：告知不拦截（组选视角，112 与 211 同组）
+  expect(state.recentRepeatHint.value).toBe('');
+  state.recentDraws.value = [{ date: '2026-10-13', code: '211' }, { date: '2026-10-12', code: '456' }];
+  state.customForm.selectedCode = '112';
+  expect(state.recentRepeatHint.value).toContain('该号近 7 日已开出 1 次');
+  state.customForm.selectedCode = '789';
+  expect(state.recentRepeatHint.value).toBe('');
+
+  // 3. 智能机选：组六过滤 + 排除近期开过号 + 排除豹子
+  Object.assign(state.pickFilters, { excludeRecent: true, groupSixOnly: true, excludeLeopard: true, sumMin: '', sumMax: '' });
+  state.smartRandomCode();
+  expect(state.pickFilterMsg.value).toBe('');
+  const code = state.customSelectedCode.value;
+  expect(/^[0-9]{3}$/.test(code)).toBe(true);
+  expect(new Set(code).size).toBe(3); // 组六过滤：三不同号
+  expect(['789', '879', '978', '887', '778'].includes(code)).toBe(false); // 不在近期开出集合（组选视角）
+});
+
+it('pick-assist: smart random reports failure when filters are unsatisfiable', async () => {
+  const browser = await harness();
+  await browser.login('user');
+  const state = browser.state as any;
+  state.openCustomOrder();
+  // 排除近 7 期开过的号：塞入全部组选形态，使 excludeRecent 无号可选
+  const allSorted = new Set<string>();
+  for (let a = 0; a < 10; a++) for (let b = a; b < 10; b++) for (let c = b; c < 10; c++) allSorted.add(`${a}${b}${c}`);
+  state.recentDraws.value = [...allSorted].map(sorted => ({ date: '2026-10-13', code: sorted }));
+  Object.assign(state.pickFilters, { excludeRecent: true, groupSixOnly: false, excludeLeopard: false, sumMin: '', sumMax: '' });
+  state.smartRandomCode();
+  expect(state.pickFilterMsg.value).toContain('放宽条件');
+});
+
+it('pick-assist: lucky code save and fill-from-lucky', async () => {
+  const browser = await harness();
+  await browser.login('user');
+  const state = browser.state as any;
+  state.openCustomOrder();
+  state.customForm.selectedCode = '518';
+  await state.saveLuckyCode();
+  expect(state.luckyList.value.map((entry: { code: string }) => entry.code)).toContain('518');
+  state.fillFromLucky('518');
+  expect(state.customSelectedCode.value).toBe('518');
+  expect(state.customForm.betMode).toBe('DIRECT');
+});

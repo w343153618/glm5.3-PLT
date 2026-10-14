@@ -8,6 +8,7 @@ export interface AppDatabase {
   list(kind: string): unknown[];
   insert(kind: string, id: string, value: unknown): void;
   set(kind: string, id: string, value: unknown): void;
+  delete(kind: string, id: string): void;
   transaction<T>(work: () => T): T;
   close(): void;
 }
@@ -31,6 +32,7 @@ export function createDatabase(filename = ':memory:'): AppDatabase {
   const insert = sqlite.prepare('INSERT OR IGNORE INTO records (kind, id, body) VALUES (?, ?, ?)');
   const set = sqlite.prepare(`INSERT INTO records (kind, id, body) VALUES (?, ?, ?)
     ON CONFLICT(kind, id) DO UPDATE SET body = excluded.body`);
+  const remove = sqlite.prepare('DELETE FROM records WHERE kind = ? AND id = ?');
   // Static table names only; audit records have no update or delete path.
   const journals = new Map(['reconciliation_ledger', 'client_attribution_audit', 'voucher_audit', 'share_event'].map(kind => {
     sqlite.exec(`CREATE TABLE IF NOT EXISTS ${kind} (id TEXT PRIMARY KEY, body TEXT NOT NULL) STRICT;
@@ -63,6 +65,10 @@ export function createDatabase(filename = ':memory:'): AppDatabase {
     set(kind, id, value) {
       if (journals.has(kind)) throw new DomainError('审计流水仅允许追加，不能修改');
       set.run(kind, id, JSON.stringify(value));
+    },
+    delete(kind, id) {
+      if (journals.has(kind)) throw new DomainError('审计流水不允许删除');
+      remove.run(kind, id);
     },
     transaction(work) {
       const savepoint = `module_${depth}`;

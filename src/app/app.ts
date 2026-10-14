@@ -13,6 +13,8 @@ import { StoreSchema, StoreManagerSchema, ClientSchema } from '../shared/schemas
 import { createStoreModule } from '../modules/store/index.ts';
 import { createStrategyModule } from '../modules/strategy/index.ts';
 import { createDrawStatsModule } from '../modules/draw-stats/index.ts';
+import { createLuckyModule } from '../modules/lucky/index.ts';
+import { fetchNextDrawTime } from '../modules/lottery-crawler/index.ts';
 import { createRegistryModule } from '../modules/registry/index.ts';
 import { seedDemo } from './seed.ts';
 import { createReconciliationModule } from '../modules/reconciliation/index.ts';
@@ -54,6 +56,10 @@ const rolePolicies = new Map<string, readonly Actor['role'][]>([
   ['GET /api/stats/trends', ['client', 'manager', 'hq']],
   ['GET /api/stats/code/:code', ['client', 'manager', 'hq']],
   ['GET /api/stats/recent', ['client', 'manager', 'hq']],
+  ['GET /api/stats/next-draw', ['client', 'manager', 'hq']],
+  ['GET /api/lucky-codes', ['client']],
+  ['POST /api/lucky-codes', ['client']],
+  ['DELETE /api/lucky-codes/:code', ['client']],
 ]);
 const publicRoutes = new Set(['GET /api/health', 'POST /api/auth/login', 'POST /api/auth/logout', 'POST /api/auth/register', 'GET /api/referrals/code/:code']);
 
@@ -82,6 +88,7 @@ export async function buildApp(options: AppOptions = {}) {
   const reconciliation = createReconciliationModule(db, stores);
   const referral = createReferralModule(db);
   const drawStats = createDrawStatsModule(strategy);
+  const lucky = createLuckyModule(db);
   let access: Awaited<ReturnType<typeof createAccess>>;
   try {
     if (options.seed !== false) seedDemo(db, stores, strategy, registry, currentDate());
@@ -205,6 +212,30 @@ export async function buildApp(options: AppOptions = {}) {
   app.get('/api/stats/recent', async (request) => {
     access.actor(request);
     return drawStats.recent((request.query as { days?: string }).days ?? 7);
+  });
+  // 下期开奖时间（北京时间字符串，huiniao next_open_time；失败返回 null，前端隐藏倒计时）
+  app.get('/api/stats/next-draw', async (request) => {
+    access.actor(request);
+    return { nextOpenTime: await fetchNextDrawTime() };
+  });
+
+  // lucky：客户幸运号收藏（仅 client，clientId 归属校验）
+  app.get('/api/lucky-codes', async (request) => {
+    const actor = access.actor(request);
+    if (actor.role !== 'client' || !actor.clientId) throw new DomainError('仅客户可查看幸运号', 403);
+    return { codes: lucky.list(actor.clientId) };
+  });
+  app.post('/api/lucky-codes', async (request) => {
+    const actor = access.actor(request);
+    if (actor.role !== 'client' || !actor.clientId) throw new DomainError('仅客户可收藏幸运号', 403);
+    const body = request.body as { code?: string };
+    return lucky.save(actor.clientId, body?.code);
+  });
+  app.delete('/api/lucky-codes/:code', async (request) => {
+    const actor = access.actor(request);
+    if (actor.role !== 'client' || !actor.clientId) throw new DomainError('仅客户可删除幸运号', 403);
+    lucky.remove(actor.clientId, (request.params as { code: string }).code);
+    return { ok: true };
   });
 
   app.get('/api/referrals/me', async (request) => {

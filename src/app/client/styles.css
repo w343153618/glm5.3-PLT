@@ -182,3 +182,38 @@
 .drawer-content{position:relative}
 #app[watermarked] .drawer-content::after{content:'';position:absolute;inset:0;z-index:5;pointer-events:none;
   background-image:var(--watermark-image);background-repeat:repeat;opacity:0.92}
+
+/* ---- pick-assist：形态解说卡 / 重号提示 / 智能机选 / 幸运号 / 走势面板 / 倒计时 ---- */
+.countdown-banner{margin:8px 0 0;padding:6px 10px;border:1px solid var(--line);border-radius:8px;
+  background:rgba(23,100,88,.08);color:#176458;font-size:.85rem}
+.form-card{margin:10px 0 0;padding:8px 12px;border:1px solid var(--line);border-radius:10px;
+  background:rgba(23,100,88,.06);display:flex;flex-wrap:wrap;gap:4px 12px;align-items:baseline;font-size:.85rem}
+.form-card strong{color:#176458;font-size:.95rem}
+.form-card small{width:100%;color:var(--muted)}
+.repeat-hint{margin:6px 0 0;font-size:.8rem;color:#8a6d3b;background:rgba(230,200,120,.15);
+  padding:4px 8px;border-radius:6px}
+.smart-pick{margin-top:10px;border:1px solid var(--line);border-radius:10px;padding:6px 10px}
+.smart-pick summary{cursor:pointer;font-size:.85rem;color:#176458;user-select:none}
+.smart-pick-body{display:flex;flex-direction:column;gap:8px;padding:8px 2px 4px;font-size:.85rem}
+.smart-pick-body label{display:flex;align-items:center;gap:6px}
+.smart-pick-sum input{width:72px;padding:4px 6px;border:1px solid var(--line);border-radius:6px}
+.lucky-chips{display:flex;flex-wrap:wrap;gap:8px}
+.lucky-chip{display:inline-flex;align-items:center;border:1px solid var(--line);border-radius:8px;overflow:hidden}
+.lucky-chip button:first-child{padding:6px 10px;font-weight:600;letter-spacing:2px;background:none;border:none;
+  cursor:pointer;font-size:.95rem;color:#176458}
+.chip-remove{padding:2px 8px;background:none;border:none;border-left:1px solid var(--line);cursor:pointer;
+  color:#a02432;font-size:.9rem}
+.trends-window-switch{display:flex;gap:6px}
+.trends-list{display:flex;flex-wrap:wrap;gap:6px}
+.trend-chip{display:flex;flex-direction:column;align-items:center;padding:2px 8px;border:1px solid var(--line);
+  border-radius:8px;background:none;cursor:pointer;font-size:.8rem}
+.trend-chip small{color:var(--muted)}
+.trend-chip strong{color:#176458;letter-spacing:2px}
+.hot-cold{margin-top:6px}
+.hot-cold-title{font-size:.8rem;color:var(--muted)}
+.hot-bars{display:flex;flex-wrap:wrap;gap:4px 8px;margin-top:2px}
+.hot-bar-item{display:flex;align-items:center;gap:3px;font-size:.75rem}
+.hot-bar{width:46px;height:8px;border-radius:4px;background:rgba(0,0,0,.08);overflow:hidden;display:inline-block}
+.hot-bar i{display:block;height:100%;background:#176458}
+.sumspan-grid{display:flex;flex-wrap:wrap;gap:4px 8px;margin-top:6px}
+.sumspan-cell{font-size:.75rem;color:var(--muted);border:1px solid var(--line);border-radius:6px;padding:1px 6px}

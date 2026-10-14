@@ -343,6 +343,53 @@
         <button type="button" :class="['bet-mode-btn', { primary: customForm.betMode === 'GROUP_3' }]" @click="setCustomMode('GROUP_3')">组选三</button>
       </div>
 
+      <!-- pick-assist：开奖倒计时（next-draw 失败时隐藏；纯提示不锁单） -->
+      <p v-if="nextDraw.countdown" class="countdown-banner" role="status">{{ nextDraw.countdown }}</p>
+
+      <!-- pick-assist：形态解说卡（拨满 3 位直选号时实时显示形态/奖金/概率/2元回报） -->
+      <div v-if="customFormCard" class="form-card">
+        <strong>{{ customFormCard.form }}</strong>
+        <span>和值 {{ customFormCard.sum }}</span>
+        <span>直选 ¥{{ customFormCard.quota }} · 中奖概率 {{ customFormCard.odds }} · 2 元理论回报 ¥{{ (customFormCard.quota / 500).toFixed(1) }}</span>
+        <span v-if="customFormCard.groupQuota">组选 ¥{{ customFormCard.groupQuota }} · 概率 {{ customFormCard.groupOdds }} · 2 元回报 ¥{{ (customFormCard.groupQuota / (Number(customFormCard.groupOdds.split('/')[0]) * 1000 / 1000 / 2 * 2)).toFixed(1) }}</span>
+        <small>{{ customFormCard.note }}</small>
+      </div>
+      <!-- pick-assist：近期重号轻提示（告知不拦截，走势参考口径） -->
+      <p v-if="recentRepeatHint" class="repeat-hint">{{ recentRepeatHint }}</p>
+
+      <!-- pick-assist：智能机选（带过滤器；机选筛选，非推荐） -->
+      <details class="smart-pick">
+        <summary>🎯 智能机选（按条件筛选 · 非推荐）</summary>
+        <div class="smart-pick-body">
+          <label><input type="checkbox" v-model="pickFilters.excludeRecent"> 排除近 7 期开过的号</label>
+          <label><input type="checkbox" v-model="pickFilters.groupSixOnly"> 只要组六形态（三不同号）</label>
+          <label><input type="checkbox" v-model="pickFilters.excludeLeopard"> 排除豹子号</label>
+          <div class="smart-pick-sum">
+            <label>和值区间
+              <input v-model="pickFilters.sumMin" type="number" min="0" max="27" placeholder="下限" inputmode="numeric">
+              ~
+              <input v-model="pickFilters.sumMax" type="number" min="0" max="27" placeholder="上限" inputmode="numeric">
+            </label>
+          </div>
+          <button type="button" class="text-button" @click="smartRandomCode">🎲 按条件机选一注</button>
+          <p v-if="pickFilterMsg" class="field-error" style="margin: 4px 0 0;">{{ pickFilterMsg }}</p>
+        </div>
+      </details>
+
+      <!-- pick-assist：我的幸运号（一键复投） -->
+      <details v-if="luckyList.length" class="smart-pick">
+        <summary>⭐ 我的幸运号（{{ luckyList.length }}）</summary>
+        <div class="smart-pick-body">
+          <div class="lucky-chips">
+            <span v-for="entry in luckyList" :key="entry.id" class="lucky-chip">
+              <button type="button" @click="fillFromLucky(entry.code)">{{ entry.code }}</button>
+              <button type="button" class="chip-remove" aria-label="删除幸运号" @click="removeLuckyCode(entry.code)" :disabled="luckyBusy">×</button>
+            </span>
+          </div>
+        </div>
+      </details>
+
+
       <!-- 直选复式/单式选球 -->
       <template v-if="customForm.betMode === 'DIRECT'">
         <div class="ball-row">
@@ -484,14 +531,80 @@
         <span>金额 <strong>¥{{ customTotalCost.toFixed(2) }}</strong></span>
         <span>余额 <strong>{{ client ? money(client.reconciliationBalance) : '¥0.00' }}</strong></span>
         <p v-if="client && client.reconciliationBalance < customTotalCost" class="field-error" style="color: #a02432; font-size: 0.88rem; margin-top: 8px;">
-          余额不足（差 ¥{{ (customTotalCost - client.reconciliationBalance).toFixed(2) }}）
+          余额不足（差 ¥{{ (customTotalCost - client.reconciliationBalance).toFixed(2) }}）——可在「拓客」页向店长出示您的专属二维码，添加店长微信充值
         </p>
       </div>
 
       <button type="submit" class="primary wide" :disabled="!!pending || !client || client.reconciliationBalance < customTotalCost || customQuantity === 0">
         {{ pending === 'custom-order' ? '正在投注扣款…' : '确认投注 (' + customQuantity + '注 · ¥' + customTotalCost.toFixed(2) + ')' }}
       </button>
+
+      <!-- pick-assist：收藏当前号为幸运号 -->
+      <button v-if="customSelectedCode && /^[0-9]{3}$/.test(customSelectedCode)" type="button" class="text-button" style="margin-top: 8px;" @click="saveLuckyCode" :disabled="luckyBusy">⭐ 收藏 {{ customSelectedCode }} 为幸运号</button>
+
+      <!-- pick-assist：走势参考折叠区（历史统计口径，非推荐） -->
+      <details class="smart-pick trends-panel">
+        <summary @click.prevent="toggleTrendsPanel">📊 走势参考（历史统计 · 非推荐）</summary>
+        <div class="smart-pick-body">
+          <div class="trends-window-switch">
+            <button v-for="size in [30, 50, 100]" :key="size" type="button" :class="['bet-mode-btn', { primary: trendsPanel.window === size }]" @click="switchTrendsWindow(size)">近 {{ size }} 期</button>
+          </div>
+          <p v-if="trendsPanel.loading" style="margin: 6px 0;">走势加载中…</p>
+          <p v-if="trendsPanel.error" class="field-error" style="margin: 6px 0;">{{ trendsPanel.error }}</p>
+          <template v-if="trendsPanel.data">
+            <div class="trends-list">
+              <button v-for="draw in trendsPanel.data.draws.slice(0, 30)" :key="draw.date" type="button" class="trend-chip" @click="lookupCodeHistory(draw.code)" :title="draw.date">
+                <small>{{ draw.date.slice(5) }}</small><strong>{{ draw.code }}</strong>
+              </button>
+            </div>
+            <div v-for="(pos, index) in trendsPanel.data.positions" :key="'pos' + index" class="hot-cold">
+              <span class="hot-cold-title">{{ ['百位', '十位', '个位'][index] }}（近 {{ trendsPanel.data.total }} 期出现次数）</span>
+              <div class="hot-bars">
+                <span v-for="(count, digit) in pos.counts" :key="digit" class="hot-bar-item">
+                  <small>{{ digit }}</small>
+                  <span class="hot-bar"><i :style="{ width: (count / Math.max(1, Math.max(...pos.counts)) * 100) + '%' }"></i></span>
+                  <small>{{ count }}</small>
+                </span>
+              </div>
+            </div>
+            <details class="trends-sumspan">
+              <summary>和值 / 跨度分布</summary>
+              <div class="sumspan-grid">
+                <span v-for="(count, value) in trendsPanel.data.sum" :key="'s' + value" v-show="count > 0" class="sumspan-cell">和{{ value }}:{{ count }}</span>
+                <span v-for="(count, value) in trendsPanel.data.span" :key="'p' + value" v-show="count > 0" class="sumspan-cell">跨{{ value }}:{{ count }}</span>
+              </div>
+            </details>
+          </template>
+        </div>
+      </details>
     </form>
+  </dialog>
+
+  <!-- pick-assist：号码历史查询弹窗 -->
+  <dialog v-if="role === 'client'" ref="codeHistoryDialog" class="drawer" aria-labelledby="code-history-title" @click="$event.target === codeHistoryDialog && codeHistoryDialog.close()">
+    <div class="drawer-content">
+      <div class="drawer-heading">
+        <div>
+          <h2 id="code-history-title">号码历史统计</h2>
+          <p v-if="codeHistoryView.code">号码 {{ codeHistoryView.code }}（历史统计 · 非推荐）</p>
+        </div>
+        <button type="button" class="icon-button" aria-label="关闭历史查询" @click="codeHistoryDialog.close()">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg>
+        </button>
+      </div>
+      <p v-if="codeHistoryView.loading" style="margin: 6px 0;">查询中…</p>
+      <p v-if="codeHistoryView.error" class="field-error">{{ codeHistoryView.error }}</p>
+      <template v-if="codeHistoryView.data">
+        <div class="balance-preview">
+          <span>直选命中 <strong>{{ codeHistoryView.data.straightHits }} 次</strong></span>
+          <span>组选命中 <strong>{{ codeHistoryView.data.groupHits }} 次</strong></span>
+        </div>
+        <p style="font-size: 0.88rem; color: var(--muted); margin-top: 8px;">
+          最近直选开出：{{ codeHistoryView.data.lastStraightHit || '从未' }} · 最近组选开出：{{ codeHistoryView.data.lastGroupHit || '从未' }}
+        </p>
+      </template>
+      <button type="button" class="wide" style="margin-top: 10px;" @click="codeHistoryDialog.close()">关闭</button>
+    </div>
   </dialog>
   <dialog ref="photoDialog" class="drawer" aria-labelledby="photo-title" @click="$event.target === photoDialog && photoDialog.close()"><div class="drawer-content photo-viewer"><div class="drawer-heading"><div><h2 id="photo-title">彩票票照</h2><p v-if="photoViewing">{{ photoViewing.date }} · {{ formatOrderCode(photoViewing) }}</p></div><button type="button" class="icon-button" aria-label="关闭票照" @click="photoDialog.close()"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button></div><img v-if="photoViewing" :src="photoUrl(photoViewing)" alt="彩票照片" style="width: 100%; border-radius: 10px; border: 1px solid var(--line);"><button type="button" class="wide" style="margin-top: 10px;" @click="photoDialog.close()">关闭</button></div></dialog>
   <div class="toast" :class="{ visible: toast }" role="status" aria-live="polite">{{ toast }}</div>

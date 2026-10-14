@@ -73,6 +73,7 @@ createApp({
     const orderDialog = ref(null);
     const followDialog = ref(null);
     const customDialog = ref(null);
+    const codeHistoryDialog = ref(null);
     const portfolioDialog = ref(null);
     const followForm = reactive({ selectedCode: '', quantity: 1, multiplier: 1 });
     const customForm = reactive({
@@ -84,7 +85,19 @@ createApp({
       group3Repeats: [],
       group3Singles: [],
       multiplier: 1,
+      selectedCode: '',
     });
+    // ---- pick-assist：智能机选过滤器 / 重号提示 / 走势面板 / 幸运号 / 倒计时 ----
+    const pickFilters = reactive({ excludeRecent: true, groupSixOnly: false, excludeLeopard: false, sumMin: '', sumMax: '' });
+    const pickFilterMsg = ref('');
+    const recentDraws = ref([]); // 近 7 天开奖（重号提示数据源，client 登录后加载）
+    const trendsPanel = reactive({ visible: false, window: 30, loading: false, error: '', data: null });
+    const codeHistoryView = reactive({ visible: false, code: '', loading: false, error: '', data: null });
+    const luckyList = ref([]);
+    const luckyBusy = ref(false);
+    const nextDraw = reactive({ time: null, countdown: '' });
+    let countdownTimer = null;
+    let recentStale = false;
     const management = ref(false);
     const hqDate = ref('');
     let sessionEpoch = 0;
@@ -314,7 +327,7 @@ createApp({
       scopeError.value = ''; formError.value = ''; failedForm.value = ''; toast.value = ''; management.value = false;
       orderForm.clientId = ''; adjustmentForm.clientId = ''; adjustmentForm.amount = ''; adjustmentForm.note = '';
       clientForm.name = ''; clientForm.introducedByClientId = '';
-      orderDialog.value?.close(); dayDialog.value?.close(); followDialog.value?.close(); customDialog.value?.close(); day.value = null;
+      orderDialog.value?.close(); dayDialog.value?.close(); followDialog.value?.close(); customDialog.value?.close(); codeHistoryDialog.value?.close(); day.value = null;
     }
     function clearSession() {
       ++sessionEpoch;
@@ -323,6 +336,13 @@ createApp({
       clearTimeout(toastTimer);
       stopPolling();
       stopWatermark();
+      // pick-assist：清理客户侧辅助数据与倒计时定时器
+      recentStale = false; recentDraws.value = []; luckyList.value = [];
+      nextDraw.time = null; nextDraw.countdown = '';
+      clearInterval(countdownTimer); countdownTimer = null;
+      trendsPanel.visible = false; trendsPanel.data = null; trendsPanel.error = ''; trendsPanel.loading = false;
+      codeHistoryView.visible = false; codeHistoryView.data = null; codeHistoryView.code = ''; codeHistoryView.error = '';
+      pickFilterMsg.value = '';
       session.value = null;
       bootstrap.value = { today: '', stores: [], managers: [], clients: [] };
       portfolio.value = null; calendar.value = [];
@@ -389,6 +409,10 @@ createApp({
           const values = await Promise.all([api(`/api/clients/${current.clientId}`), api(`/api/clients/${current.clientId}/orders`), api(`/api/clients/${current.clientId}/reconciliations`)]);
           if (request !== scopeRequest) return;
           client.value = values[0]; clients.value = [values[0]]; orders.value = newest(values[1]); ledger.value = latestLedger(values[2]);
+          // pick-assist：客户登录后并行加载幸运号 / 近期开奖 / 下期开奖时间（失败静默，不影响主数据）
+          loadLuckyCodes().catch(() => {});
+          loadRecentDraws().catch(() => {});
+          startCountdown().catch(() => {});
         } else if (current.role === 'manager') {
           const values = await Promise.all(['clients', 'orders', 'bills', 'summary', 'reconciliations'].map(resource => api(`/api/stores/${current.storeId}/${resource}`)));
           if (request !== scopeRequest) return;
@@ -606,7 +630,11 @@ createApp({
       try { await task(); }
       catch (failure) {
         if (epoch !== sessionEpoch || !session.value || failure.stale) return;
-        formError.value = failure.message || '保存失败，填写内容已保留，请重试。';
+        // pick-assist：余额不足引导（下单类失败时附店长联系方式提示，复用推广码数据）
+        const message = failure.message || '保存失败，填写内容已保留，请重试。';
+        formError.value = /余额|结余|不足/.test(message) && ['order', 'follow', 'custom-order'].includes(key)
+          ? `${message}（可联系店长充值：在「拓客」页向店长出示您的专属二维码即可添加联系）`
+          : message;
         failedForm.value = key;
         await nextTick();
         const alert = orderDialog.value?.open
@@ -768,6 +796,154 @@ createApp({
         customForm.group3Repeats = [shuffled[0]];
         customForm.group3Singles = [shuffled[1]];
       }
+    }
+
+    // ---- pick-assist：形态解说卡 ----
+    // 拨满 3 位的直选号码 → 形态与玩法解说（直选/组三/组六/豹子、奖金、中奖概率、2 元回报）
+    const customFormCard = computed(() => {
+      const code = customSelectedCode.value && /^[0-9]{3}$/.test(customSelectedCode.value) ? customSelectedCode.value : '';
+      if (!code) return null;
+      const size = new Set(code).size;
+      const sum = Number(code[0]) + Number(code[1]) + Number(code[2]);
+      if (size === 1) return { form: '豹子', note: '三个数字全同，仅支持直选（组选不支持豹子）', quota: 1040, odds: '1/1000', sum };
+      if (size === 2) return { form: '组三形态', note: '有两个数字相同，可玩直选或组选三', quota: 1040, groupQuota: 346, groupOdds: '3/1000', odds: '1/1000', sum };
+      return { form: '组六形态', note: '三个数字互不相同，可玩直选或组选六', quota: 1040, groupQuota: 173, groupOdds: '6/1000', odds: '1/1000', sum };
+    });
+
+    // ---- pick-assist：近期重号轻提示（告知不拦截） ----
+    const recentRepeatHint = computed(() => {
+      if (!recentDraws.value.length) return '';
+      const code = customSelectedCode.value && /^[0-9]{3}$/.test(customSelectedCode.value) ? customSelectedCode.value : '';
+      if (!code) return '';
+      const sorted = value => value.split('').sort().join('');
+      const hits = recentDraws.value.filter(draw => sorted(draw.code) === sorted(code));
+      if (!hits.length) return '';
+      return `走势参考：该号近 7 日已开出 ${hits.length} 次（最近 ${hits[0].date}）`;
+    });
+
+    // ---- pick-assist：智能机选（带过滤器；文案口径「机选筛选，非推荐」） ----
+    function smartRandomCode() {
+      pickFilterMsg.value = '';
+      const excludes = new Set(pickFilters.excludeRecent ? recentDraws.value.map(draw => draw.code.split('').sort().join('')) : []);
+      const sumMin = pickFilters.sumMin === '' ? null : Number(pickFilters.sumMin);
+      const sumMax = pickFilters.sumMax === '' ? null : Number(pickFilters.sumMax);
+      for (let attempt = 0; attempt < 200; attempt += 1) {
+        const code = Array.from({ length: 3 }, () => Math.floor(Math.random() * 10)).join('');
+        const sorted = code.split('').sort().join('');
+        if (pickFilters.excludeLeopard && new Set(code).size === 1) continue;
+        if (pickFilters.groupSixOnly && new Set(code).size !== 3) continue;
+        if (excludes.has(sorted)) continue;
+        const sum = Number(code[0]) + Number(code[1]) + Number(code[2]);
+        if (sumMin !== null && sum < sumMin) continue;
+        if (sumMax !== null && sum > sumMax) continue;
+        // 命中：以直选模式回填
+        customForm.betMode = 'DIRECT';
+        customForm.directPos1 = [code[0]];
+        customForm.directPos2 = [code[1]];
+        customForm.directPos3 = [code[2]];
+        return;
+      }
+      pickFilterMsg.value = '当前筛选条件下 200 次尝试未出号，请放宽条件再试。';
+    }
+
+    // ---- pick-assist：幸运号 ----
+    async function loadLuckyCodes() {
+      if (role.value !== 'client') return;
+      try {
+        const result = await api('/api/lucky-codes', undefined, 'GET');
+        luckyList.value = result.codes ?? [];
+      } catch { luckyList.value = []; }
+    }
+    async function saveLuckyCode() {
+      const code = customSelectedCode.value && /^[0-9]{3}$/.test(customSelectedCode.value) ? customSelectedCode.value : '';
+      if (!code) { formError.value = '请先拨出 3 位号码再收藏。'; return; }
+      luckyBusy.value = true;
+      try {
+        await api('/api/lucky-codes', { code });
+        await loadLuckyCodes();
+        notify('已收藏为幸运号');
+      } catch (failure) {
+        formError.value = failure.message || '收藏失败，请稍后重试。';
+      } finally { luckyBusy.value = false; }
+    }
+    async function removeLuckyCode(code) {
+      luckyBusy.value = true;
+      try {
+        await api(`/api/lucky-codes/${code}`, undefined, 'DELETE');
+        await loadLuckyCodes();
+      } catch (failure) {
+        formError.value = failure.message || '删除失败，请稍后重试。';
+      } finally { luckyBusy.value = false; }
+    }
+    function fillFromLucky(code) {
+      customForm.betMode = 'DIRECT';
+      customForm.directPos1 = [code[0]];
+      customForm.directPos2 = [code[1]];
+      customForm.directPos3 = [code[2]];
+    }
+
+    // ---- pick-assist：走势参考面板 ----
+    async function toggleTrendsPanel() {
+      trendsPanel.visible = !trendsPanel.visible;
+      if (trendsPanel.visible && !trendsPanel.data) await loadTrends();
+    }
+    async function loadTrends() {
+      trendsPanel.loading = true; trendsPanel.error = '';
+      try {
+        trendsPanel.data = await api(`/api/stats/trends?window=${trendsPanel.window}`, undefined, 'GET');
+      } catch (failure) {
+        trendsPanel.error = failure.message || '走势参考加载失败，请稍后重试。';
+      } finally { trendsPanel.loading = false; }
+    }
+    async function switchTrendsWindow(size) {
+      trendsPanel.window = size;
+      await loadTrends();
+    }
+    async function lookupCodeHistory(code) {
+      codeHistoryView.visible = true; codeHistoryView.code = code;
+      codeHistoryView.loading = true; codeHistoryView.error = ''; codeHistoryView.data = null;
+      try {
+        codeHistoryView.data = await api(`/api/stats/code/${code}`, undefined, 'GET');
+        await nextTick();
+        codeHistoryDialog.value?.showModal();
+      } catch (failure) {
+        codeHistoryView.error = failure.message || '历史查询失败，请稍后重试。';
+      } finally { codeHistoryView.loading = false; }
+    }
+
+    // ---- pick-assist：开奖倒计时（20:00 后显示；失败隐藏） ----
+    async function startCountdown() {
+      try {
+        const result = await api('/api/stats/next-draw', undefined, 'GET');
+        nextDraw.time = result?.nextOpenTime ?? null;
+      } catch { nextDraw.time = null; }
+      refreshCountdown();
+      clearInterval(countdownTimer);
+      countdownTimer = nextDraw.time ? setInterval(refreshCountdown, 30000) : null;
+    }
+    function refreshCountdown() {
+      nextDraw.countdown = '';
+      if (!nextDraw.time) return;
+      const target = new Date(`${nextDraw.time.replace(' ', 'T')}+08:00`);
+      const diff = target - Date.now();
+      if (diff <= 0) return;
+      const hours = Math.floor(diff / 3600000);
+      const minutes = Math.floor((diff % 3600000) / 60000);
+      const now = new Date();
+      const beijingHour = (now.getUTCHours() + 8) % 24;
+      if (beijingHour >= 20 || beijingHour < 2) {
+        nextDraw.countdown = hours < 1 && minutes < 15
+          ? '临近开奖，请尽快完成跟单'
+          : `距今晚开奖约 ${hours} 小时 ${minutes} 分`;
+      }
+    }
+
+    // ---- pick-assist：近期开奖（重号提示数据源） ----
+    async function loadRecentDraws() {
+      try {
+        const result = await api('/api/stats/recent?days=7', undefined, 'GET');
+        if (!recentStale) recentDraws.value = result?.draws ?? [];
+      } catch { /* 静默：重号提示非关键功能 */ }
     }
     function submitCustomOrder() {
       return perform('custom-order', async () => {
@@ -967,6 +1143,6 @@ createApp({
       }
       initialize();
     });
-    return { view, bootstrap, session, authChecking, authBusy, authError, logoutUnconfirmed, loginForm, registerForm, registerMode, referral, referralError, referralToast, qrCanvas, photoDialog, photoFileInput, photoViewing, watermarked, role, roleTitle, roleLabel, manager, store, client, ownClients, portfolio, calendar, clients, orders, bills, ledger, audits, attributionSummary, attributionTotals, referralStats, summary, storedCount, loading, scopeLoading, error, scopeError, formError, failedForm, pending, toast, day, dayDialog, orderDialog, followDialog, customDialog, portfolioDialog, followForm, followTotalCost, customForm, customQuantity, customSelectedCode, customTotalCost, customGroupType, toggleBall, selectAllBalls, clearBalls, setCustomMode, formatOrderCode, orderModeTag, isEditingPortfolio, orderForm, adjustmentForm, adjustmentUnconfirmed, adjustmentClient, adjustmentBalance, adjustmentInvalid, startAdjustment, resultForm, portfolioForm, storeForm, managerForm, clientForm, management, hqDate, title, hitCount, verifiedCount, calendarPadding, billMap, money, shortDate, dateTime, clientName, managerName, storeName, statusLabel, voucherLabel, syncing, syncMsg, syncOfficialLottery, initialize, login, register, copyReferralLink, recordReferralShare, photoUrl, pickPhoto, onPhotoPicked, openPhoto, logout, loadScope, loadGlobal, openDay, openOrder, openFollow, submitFollowOrder, openCustomOrder, randomCustomCode, submitCustomOrder, getOrderResolution, openPortfolioDialog, editPortfolioToday, savePortfolioModal, openManagement, closeOrder, saveOrder, claimVoucher, saveAdjustment, saveResolution, savePortfolio, saveStore, saveManager, saveClient, switchView, syncHash };
+    return { view, bootstrap, session, authChecking, authBusy, authError, logoutUnconfirmed, loginForm, registerForm, registerMode, referral, referralError, referralToast, qrCanvas, photoDialog, photoFileInput, photoViewing, watermarked, role, roleTitle, roleLabel, manager, store, client, ownClients, portfolio, calendar, clients, orders, bills, ledger, audits, attributionSummary, attributionTotals, referralStats, summary, storedCount, loading, scopeLoading, error, scopeError, formError, failedForm, pending, toast, day, dayDialog, orderDialog, followDialog, customDialog, codeHistoryDialog, portfolioDialog, followForm, followTotalCost, customForm, customQuantity, customSelectedCode, customTotalCost, customGroupType, customFormCard, recentRepeatHint, recentDraws, pickFilters, pickFilterMsg, smartRandomCode, luckyList, luckyBusy, saveLuckyCode, removeLuckyCode, fillFromLucky, trendsPanel, toggleTrendsPanel, switchTrendsWindow, codeHistoryView, lookupCodeHistory, nextDraw, toggleBall, selectAllBalls, clearBalls, setCustomMode, formatOrderCode, orderModeTag, isEditingPortfolio, orderForm, adjustmentForm, adjustmentUnconfirmed, adjustmentClient, adjustmentBalance, adjustmentInvalid, startAdjustment, resultForm, portfolioForm, storeForm, managerForm, clientForm, management, hqDate, title, hitCount, verifiedCount, calendarPadding, billMap, money, shortDate, dateTime, clientName, managerName, storeName, statusLabel, voucherLabel, syncing, syncMsg, syncOfficialLottery, initialize, login, register, copyReferralLink, recordReferralShare, photoUrl, pickPhoto, onPhotoPicked, openPhoto, logout, loadScope, loadGlobal, openDay, openOrder, openFollow, submitFollowOrder, openCustomOrder, randomCustomCode, submitCustomOrder, getOrderResolution, openPortfolioDialog, editPortfolioToday, savePortfolioModal, openManagement, closeOrder, saveOrder, claimVoucher, saveAdjustment, saveResolution, savePortfolio, saveStore, saveManager, saveClient, switchView, syncHash };
   },
 }).mount('#app');
