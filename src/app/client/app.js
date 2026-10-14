@@ -18,6 +18,10 @@ createApp({
     const referralError = ref('');
     const referralToast = ref('');
     const qrCanvas = ref(null);
+    const photoDialog = ref(null);
+    const photoFileInput = ref(null);
+    const photoViewing = ref(null);
+    const photoTargetOrderId = ref('');
     const portfolio = ref(null);
     const calendar = ref([]);
     const clients = ref([]);
@@ -492,6 +496,48 @@ createApp({
         if (!failure.stale) referralToast.value = failure.message || '记录失败，请稍后重试。';
       } finally { pending.value = ''; }
     }
+    // ---- 票照上传与查看（ticket-photo）----
+    function photoUrl(item) {
+      return `/api/orders/${item.id}/photo?token=${item.photoToken}`;
+    }
+    function pickPhoto(item) {
+      if (pending.value) return;
+      photoTargetOrderId.value = item.id;
+      if (photoFileInput.value) {
+        photoFileInput.value.value = '';
+        photoFileInput.value.click();
+      }
+    }
+    async function onPhotoPicked(event) {
+      const orderId = photoTargetOrderId.value;
+      const file = event.target.files?.[0];
+      if (!orderId || !file) return;
+      if (file.size > 5 * 1024 * 1024) {
+        notify('照片超过 5MB，请重新拍摄或压缩后再上传。');
+        return;
+      }
+      const photoBase64 = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result).split(',')[1]);
+        reader.onerror = () => reject(reader.error);
+        reader.readAsDataURL(file);
+      }).catch(() => null);
+      if (!photoBase64) { notify('读取照片失败，请重试。'); return; }
+      pending.value = `photo-${orderId}`;
+      try {
+        const updated = await api(`/api/orders/${orderId}/photo`, { photoBase64 });
+        const row = orders.value.find((row) => row.id === orderId);
+        if (row) { row.photoToken = updated.photoToken; row.photoMime = updated.photoMime; }
+        notify('票照已上传，客户可以查看啦。');
+      } catch (failure) {
+        if (!failure.stale) notify(failure.message || '上传失败，请重试。');
+      } finally { pending.value = ''; photoTargetOrderId.value = ''; }
+    }
+    async function openPhoto(item) {
+      photoViewing.value = item;
+      await nextTick();
+      photoDialog.value?.showModal();
+    }
     async function logout() {
       if (authBusy.value || pending.value) return;
       clearSession(); authBusy.value = true; authError.value = ''; logoutUnconfirmed.value = true;
@@ -893,6 +939,6 @@ createApp({
       }
       initialize();
     });
-    return { view, bootstrap, session, authChecking, authBusy, authError, logoutUnconfirmed, loginForm, registerForm, registerMode, referral, referralError, referralToast, qrCanvas, role, roleTitle, roleLabel, manager, store, client, ownClients, portfolio, calendar, clients, orders, bills, ledger, audits, attributionSummary, attributionTotals, referralStats, summary, storedCount, loading, scopeLoading, error, scopeError, formError, failedForm, pending, toast, day, dayDialog, orderDialog, followDialog, customDialog, portfolioDialog, followForm, followTotalCost, customForm, customQuantity, customSelectedCode, customTotalCost, customGroupType, toggleBall, selectAllBalls, clearBalls, setCustomMode, formatOrderCode, orderModeTag, isEditingPortfolio, orderForm, adjustmentForm, adjustmentUnconfirmed, adjustmentClient, adjustmentBalance, adjustmentInvalid, startAdjustment, resultForm, portfolioForm, storeForm, managerForm, clientForm, management, hqDate, title, hitCount, verifiedCount, calendarPadding, billMap, money, shortDate, dateTime, clientName, managerName, storeName, statusLabel, voucherLabel, syncing, syncMsg, syncOfficialLottery, initialize, login, register, copyReferralLink, recordReferralShare, logout, loadScope, loadGlobal, openDay, openOrder, openFollow, submitFollowOrder, openCustomOrder, randomCustomCode, submitCustomOrder, getOrderResolution, openPortfolioDialog, editPortfolioToday, savePortfolioModal, openManagement, closeOrder, saveOrder, claimVoucher, saveAdjustment, saveResolution, savePortfolio, saveStore, saveManager, saveClient, switchView, syncHash };
+    return { view, bootstrap, session, authChecking, authBusy, authError, logoutUnconfirmed, loginForm, registerForm, registerMode, referral, referralError, referralToast, qrCanvas, photoDialog, photoFileInput, photoViewing, role, roleTitle, roleLabel, manager, store, client, ownClients, portfolio, calendar, clients, orders, bills, ledger, audits, attributionSummary, attributionTotals, referralStats, summary, storedCount, loading, scopeLoading, error, scopeError, formError, failedForm, pending, toast, day, dayDialog, orderDialog, followDialog, customDialog, portfolioDialog, followForm, followTotalCost, customForm, customQuantity, customSelectedCode, customTotalCost, customGroupType, toggleBall, selectAllBalls, clearBalls, setCustomMode, formatOrderCode, orderModeTag, isEditingPortfolio, orderForm, adjustmentForm, adjustmentUnconfirmed, adjustmentClient, adjustmentBalance, adjustmentInvalid, startAdjustment, resultForm, portfolioForm, storeForm, managerForm, clientForm, management, hqDate, title, hitCount, verifiedCount, calendarPadding, billMap, money, shortDate, dateTime, clientName, managerName, storeName, statusLabel, voucherLabel, syncing, syncMsg, syncOfficialLottery, initialize, login, register, copyReferralLink, recordReferralShare, photoUrl, pickPhoto, onPhotoPicked, openPhoto, logout, loadScope, loadGlobal, openDay, openOrder, openFollow, submitFollowOrder, openCustomOrder, randomCustomCode, submitCustomOrder, getOrderResolution, openPortfolioDialog, editPortfolioToday, savePortfolioModal, openManagement, closeOrder, saveOrder, claimVoucher, saveAdjustment, saveResolution, savePortfolio, saveStore, saveManager, saveClient, switchView, syncHash };
   },
 }).mount('#app');
