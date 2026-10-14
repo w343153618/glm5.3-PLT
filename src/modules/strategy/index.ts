@@ -58,6 +58,10 @@ export function createStrategyModule(db: AppDatabase) {
     return z.array(StrategyPortfolioSchema).parse(db.list('portfolio')).sort((left, right) => left.date.localeCompare(right.date));
   }
 
+  function listResolutions(): ResolutionEvent[] {
+    return z.array(ResolutionEventSchema).parse(db.list('resolution')).sort((left, right) => left.date.localeCompare(right.date));
+  }
+
   function getCalendar(endDate: string): CalendarDay[] {
     const resolutions = z.array(ResolutionEventSchema).parse(db.list('resolution'));
     return generateCalendar(endDate, listPortfolios(), resolutions);
@@ -97,7 +101,7 @@ export function createStrategyModule(db: AppDatabase) {
     });
   }
 
-  return { publishPortfolio, updatePortfolio, getPortfolio, getResolution, listPortfolios, getCalendar };
+  return { publishPortfolio, updatePortfolio, getPortfolio, getResolution, listPortfolios, listResolutions, getCalendar };
 }
 
 export type StrategyModule = ReturnType<typeof createStrategyModule>;

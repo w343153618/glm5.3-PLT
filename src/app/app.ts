@@ -12,6 +12,7 @@ import { BetModeSchema, OrderCodeSchema, OrderSlipSchema, StrategyPortfolioSchem
 import { StoreSchema, StoreManagerSchema, ClientSchema } from '../shared/schemas/store.ts';
 import { createStoreModule } from '../modules/store/index.ts';
 import { createStrategyModule } from '../modules/strategy/index.ts';
+import { createDrawStatsModule } from '../modules/draw-stats/index.ts';
 import { createRegistryModule } from '../modules/registry/index.ts';
 import { seedDemo } from './seed.ts';
 import { createReconciliationModule } from '../modules/reconciliation/index.ts';
@@ -50,6 +51,9 @@ const rolePolicies = new Map<string, readonly Actor['role'][]>([
   ['GET /api/hq/referral-stats', ['hq']],
   ['POST /api/orders/:orderId/photo', ['manager']],
   ['GET /api/orders/:orderId/photo', ['client', 'manager', 'hq']],
+  ['GET /api/stats/trends', ['client', 'manager', 'hq']],
+  ['GET /api/stats/code/:code', ['client', 'manager', 'hq']],
+  ['GET /api/stats/recent', ['client', 'manager', 'hq']],
 ]);
 const publicRoutes = new Set(['GET /api/health', 'POST /api/auth/login', 'POST /api/auth/logout', 'POST /api/auth/register', 'GET /api/referrals/code/:code']);
 
@@ -77,6 +81,7 @@ export async function buildApp(options: AppOptions = {}) {
   const registry = createRegistryModule(db, stores, strategy);
   const reconciliation = createReconciliationModule(db, stores);
   const referral = createReferralModule(db);
+  const drawStats = createDrawStatsModule(strategy);
   let access: Awaited<ReturnType<typeof createAccess>>;
   try {
     if (options.seed !== false) seedDemo(db, stores, strategy, registry, currentDate());
@@ -188,6 +193,20 @@ export async function buildApp(options: AppOptions = {}) {
       return { valid: false };
     }
   });
+  // draw-stats：开奖数据统计（三角色可见；公开开奖数据的加工，无敏感性）
+  app.get('/api/stats/trends', async (request) => {
+    access.actor(request);
+    return drawStats.trends((request.query as { window?: string }).window ?? 30);
+  });
+  app.get('/api/stats/code/:code', async (request) => {
+    access.actor(request);
+    return drawStats.codeHistory((request.params as { code: string }).code);
+  });
+  app.get('/api/stats/recent', async (request) => {
+    access.actor(request);
+    return drawStats.recent((request.query as { days?: string }).days ?? 7);
+  });
+
   app.get('/api/referrals/me', async (request) => {
     const actor = access.actor(request);
     if (actor.role !== 'manager' && actor.role !== 'client') throw new DomainError('仅店长或客户可获取推广码', 403);
