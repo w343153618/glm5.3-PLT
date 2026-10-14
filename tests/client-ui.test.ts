@@ -36,11 +36,20 @@ function clientState(fetcher: (path: string, options?: RequestInit) => Promise<R
     createApp: (component: { setup(): State }) => ({ mount: () => { state = component.setup(); } }),
     ref, reactive, computed, nextTick, onMounted: () => {},
     fetch: fetcher, crypto: { randomUUID },
+    // qr.ts 的 import 被 vm 沙箱剥除（见 source 的 replace），report-share 的二维码回调需要桩
+    encodeQr: () => ({ size: 21, get: () => false }),
+    drawQrToCanvas: () => {},
+    window: { location: { protocol: 'http:', host: 'localhost', origin: 'http://localhost', hash: '' } },
     setTimeout: () => 0, clearTimeout: () => {}, setInterval: () => 0, clearInterval: () => {},
     document: {
       getElementById: () => null, querySelector: () => null,
       // watermark 模块写入 CSS 变量所需的 documentElement 桩
       documentElement: { style: { setProperty: () => {}, removeProperty: () => {} } },
+      // report-share：drawShareReport 内部 createElement('canvas') 绘二维码的桩（宽>0 使 drawImage 执行）
+      createElement: () => ({
+        width: 100, height: 100,
+        getContext: () => new Proxy({}, { get: (_t, prop) => (prop === 'canvas' ? undefined : () => undefined), set: () => true }),
+      }),
     },
   });
   return state;
@@ -456,5 +465,52 @@ describe('report-share', () => {
     expect(state.shareReport.mode).toBe('month');
     state.setShareMode('week');
     expect(state.shareReport.mode).toBe('week');
+  });
+});
+
+describe('report-share canvas rendering', () => {
+  it('drawShareReport renders full card on a stub canvas without error', async () => {
+    const browser = await harness();
+    await browser.login('user');
+    const state = browser.state as any;
+    // stub canvas：记录全部绘制调用，getContext 返回代理对象
+    const calls: string[] = [];
+    const ctxProxy = new Proxy({}, {
+      get(_t, prop) {
+        if (prop === 'canvas') return stubCanvas;
+        return (...args: unknown[]) => { calls.push(String(prop)); return undefined; };
+      },
+      set(_t, prop, _v) { calls.push(`set:${String(prop)}`); return true; },
+    }) as CanvasRenderingContext2D;
+    const stubCanvas = {
+      width: 0, height: 0,
+      getContext: () => ctxProxy,
+      toBlob: (cb: (b: Blob | null) => void) => cb({ size: 1024 } as Blob),
+    } as unknown as HTMLCanvasElement;
+    // 注入测试数据
+    state.orders.value = [
+      { date: '2026-10-13', selectedCode: '999', betMode: 'DIRECT', quantity: 1, totalAmount: 2 },
+      { date: '2026-10-14', selectedCode: '279', betMode: 'DIRECT', quantity: 1, totalAmount: 2 },
+    ];
+    state.calendar.value = [
+      { date: '2026-10-13', resolution: { settlementCode: '931', quotaPerUnit: 1040 }, status: 'Miss' },
+      { date: '2026-10-14', resolution: { settlementCode: '279', quotaPerUnit: 1040 }, status: 'Hit' },
+    ];
+    state.bootstrap.value.today = '2026-10-14';
+    state.shareCanvas.value = stubCanvas;
+    state.shareReport.visible = true;
+    await state.openShareReport();
+    expect(state.shareReport.error).toBe('');
+    expect(state.shareReport.canvasReady).toBe(true);
+    expect(stubCanvas.width).toBe(750);
+    expect(stubCanvas.height).toBeGreaterThan(600); // 头部+数字区+底部
+    // 关键绘制步骤都执行过：背景、头部、数字、二维码 drawImage、水印 save/restore
+    for (const step of ['fillRect', 'fillText', 'drawImage', 'save', 'restore', 'rotate']) {
+      expect(calls).toContain(step);
+    }
+    // 空数据分支：清空订单重新渲染不报错
+    state.orders.value = []; state.calendar.value = [];
+    state.setShareMode(state.shareReport.mode === 'week' ? 'month' : 'week');
+    expect(state.shareReport.error).toBe('');
   });
 });
