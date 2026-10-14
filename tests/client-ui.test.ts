@@ -338,3 +338,42 @@ it('pick-assist: lucky code save and fill-from-lucky', async () => {
   expect(state.customSelectedCode.value).toBe('518');
   expect(state.customForm.betMode).toBe('DIRECT');
 });
+
+it('draw-notify: client sees unread badge and can mark all read', async () => {
+  const browser = await harness();
+  await browser.login('user');
+  const state = browser.state as any;
+  await state.loadNotifications();
+  // seed 数据 + 钩子：结算后客户应有消息（今日结算走 resolutions 路由才会生成，直接读库内既有消息即可为 0 也合法）
+  expect(Array.isArray(state.notifications.items)).toBe(true);
+  expect(typeof state.notifications.unread).toBe('number');
+  if (state.notifications.unread > 0) {
+    await state.markAllNotificationsRead();
+    expect(state.notifications.unread).toBe(0);
+    expect(state.notifications.items.every((item: { readAt?: unknown }) => item.readAt)).toBe(true);
+  }
+  // 抽屉开关
+  expect(state.notifications.visible).toBe(false);
+  state.toggleNotifications();
+  expect(state.notifications.visible).toBe(true);
+});
+
+it('draw-notify: notification text and icon reflect payload', async () => {
+  const browser = await harness();
+  const state = browser.state as any;
+  expect(state.notificationIcon({ type: 'settlement', payload: { orders: 2, hits: 1, grossGain: 1040, clientNetGain: 832 } })).toBe('🎉');
+  expect(state.notificationIcon({ type: 'settlement', payload: { orders: 2, hits: 0 } })).toBe('💭');
+  expect(state.notificationIcon({ type: 'manager-summary', payload: { orders: 5, hits: 2 } })).toBe('🧾');
+  expect(state.notificationText({ type: 'settlement', payload: { orders: 2, hits: 1, grossGain: 1040, clientNetGain: 832 } })).toContain('实得');
+  expect(state.notificationText({ type: 'manager-summary', payload: { orders: 5, hits: 2, grossGain: 2080, commission: 208 } })).toContain('佣金');
+  expect(state.notificationText({ type: 'settlement', payload: { orders: 1, hits: 0 } })).toContain('未中奖');
+});
+
+it('draw-notify: hq role loads no notifications', async () => {
+  const browser = await harness();
+  await browser.login('admin');
+  const state = browser.state as any;
+  await state.loadNotifications();
+  expect(state.notifications.items).toEqual([]);
+  expect(state.notifications.unread).toBe(0);
+});

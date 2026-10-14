@@ -58,8 +58,22 @@
   <div class="app-body">
     <header class="topbar">
       <div class="mobile-brand">门店档案</div><span v-if="bootstrap.demo" class="demo-badge">模拟数据</span><span class="topbar-date">{{ bootstrap.today || '正在读取' }}</span>
-      <div class="account-scope"><span class="account-name">{{ session.username }}<small>{{ roleLabel }}</small></span><button type="button" @click="logout" :disabled="authBusy || !!pending">退出登录</button></div>
+      <div class="account-scope"><span class="account-name">{{ session.username }}<small>{{ roleLabel }}</small></span><button v-if="role === 'client' || role === 'manager'" type="button" class="notify-bell" :aria-label="notifications.unread ? `消息中心，${notifications.unread} 条未读` : '消息中心'" :title="notifications.unread ? `${notifications.unread} 条未读消息` : '消息中心'" @click="toggleNotifications"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9a6 6 0 1 1 12 0c0 5 2 6 2 6H4s2-1 2-6M10 20a2 2 0 0 0 4 0"/></svg><span v-if="notifications.unread" class="notify-badge">{{ notifications.unread > 99 ? '99+' : notifications.unread }}</span></button><button type="button" @click="logout" :disabled="authBusy || !!pending">退出登录</button></div>
     </header>
+    <!-- draw-notify：消息抽屉 -->
+    <div v-if="notifications.visible" class="notify-backdrop" @click="toggleNotifications"></div>
+    <aside v-if="notifications.visible" class="notify-drawer" role="dialog" aria-label="消息中心">
+      <div class="notify-drawer-head"><strong>消息中心</strong><span v-if="notifications.unread" class="notify-unread-tag">{{ notifications.unread }} 条未读</span><div style="display:flex;gap:8px;"><button v-if="notifications.unread" type="button" class="ghost" @click="markAllNotificationsRead" :disabled="notifications.loading">全部已读</button><button type="button" class="ghost" @click="toggleNotifications">关闭</button></div></div>
+      <p v-if="notifications.loading && !notifications.items.length" class="notify-empty">正在读取消息…</p>
+      <p v-else-if="!notifications.items.length" class="notify-empty">暂无消息——开奖结算后这里会通知您。</p>
+      <ul v-else class="notify-list">
+        <li v-for="item in notifications.items" :key="item.id" :class="{ unread: !item.readAt }">
+          <span class="notify-icon" aria-hidden="true">{{ notificationIcon(item) }}</span>
+          <div class="notify-body"><span class="notify-date">{{ item.date }}</span><span class="notify-text">{{ notificationText(item) }}</span></div>
+          <span v-if="!item.readAt" class="notify-dot" aria-hidden="true"></span>
+        </li>
+      </ul>
+    </aside>
     <main id="main-content">
       <div class="page-heading"><div><h1>{{ title }}</h1><p v-if="role === 'client' && client">{{ client.name }} · {{ store?.name }}</p><p v-else-if="role === 'manager' && store">{{ store.name }} · {{ manager?.name }}</p></div><div style="display: flex; gap: 10px; align-items: center;"><button v-if="role === 'client'" type="button" class="primary" @click="openCustomOrder" :disabled="loading || scopeLoading || !client || !!pending" style="display: flex; align-items: center; gap: 6px;"><svg viewBox="0 0 24 24" style="width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2.2;" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="m12 8 4 4-4 4M8 12h8"/></svg>自主选号</button><button v-if="view === 'workspace' && role === 'manager'" type="button" class="primary" @click="openOrder" :disabled="loading || scopeLoading || !store || !!pending">登记已完成业务<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg></button></div></div>
       <div v-if="error" class="notice error" role="alert"><span>{{ error }}</span><button type="button" @click="initialize" :disabled="loading">重新加载</button></div>

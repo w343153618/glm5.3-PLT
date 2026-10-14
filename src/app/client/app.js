@@ -98,6 +98,8 @@ createApp({
     const nextDraw = reactive({ time: null, countdown: '' });
     let countdownTimer = null;
     let recentStale = false;
+    // draw-notify：应用内消息中心（客户/店长）
+    const notifications = reactive({ items: [], unread: 0, visible: false, loading: false });
     const management = ref(false);
     const hqDate = ref('');
     let sessionEpoch = 0;
@@ -329,6 +331,46 @@ createApp({
       clientForm.name = ''; clientForm.introducedByClientId = '';
       orderDialog.value?.close(); dayDialog.value?.close(); followDialog.value?.close(); customDialog.value?.close(); codeHistoryDialog.value?.close(); day.value = null;
     }
+    // draw-notify：加载消息中心（client/manager 登录后；失败静默）
+    async function loadNotifications() {
+      if (!session.value || (session.value.role !== 'client' && session.value.role !== 'manager')) return;
+      try {
+        const data = await api('/api/notifications', undefined, 'GET');
+        notifications.items = data.items ?? [];
+        notifications.unread = data.unread ?? 0;
+      } catch { /* 静默：红点缺失可接受 */ }
+    }
+    function toggleNotifications() {
+      notifications.visible = !notifications.visible;
+      if (notifications.visible) {
+        notifications.loading = true;
+        loadNotifications().finally(() => { notifications.loading = false; });
+      }
+    }
+    async function markAllNotificationsRead() {
+      if (!notifications.unread) return;
+      try {
+        await api('/api/notifications/read', { all: true });
+        notifications.items = notifications.items.map(item => ({ ...item, readAt: item.readAt ?? new Date().toISOString() }));
+        notifications.unread = 0;
+      } catch (failure) { toast.value = failure.message || '标记已读失败，请重试。'; }
+    }
+    function notificationIcon(item) {
+      if (item.type === 'manager-summary') return '🧾';
+      return item.payload?.hits > 0 ? '🎉' : '💭';
+    }
+    function notificationText(item) {
+      const p = item.payload ?? {};
+      const head = item.type === 'manager-summary' ? `名下客户跟单 ${p.orders} 注` : `您跟单 ${p.orders} 注`;
+      const result = p.hits > 0 ? `中 ${p.hits} 注` : '未中奖';
+      let tail = '';
+      if (p.hits > 0 && p.grossGain !== undefined) {
+        if (item.type === 'manager-summary') tail = `，奖金 ${money(p.grossGain)}（佣金 ${money(p.commission ?? 0)}）`;
+        else tail = `，奖金 ${money(p.grossGain)}（实得 ${money(p.clientNetGain ?? 0)}）`;
+      }
+      return `${head}，${result}${tail}`;
+    }
+
     function clearSession() {
       ++sessionEpoch;
       ++globalRequest;
@@ -338,6 +380,8 @@ createApp({
       stopWatermark();
       // pick-assist：清理客户侧辅助数据与倒计时定时器
       recentStale = false; recentDraws.value = []; luckyList.value = [];
+      // draw-notify：清理消息中心
+      notifications.items = []; notifications.unread = 0; notifications.visible = false; notifications.loading = false;
       wechatForm.input = ''; wechatForm.saved = null; wechatForm.managerWechat = null; wechatForm.managerName = ''; wechatForm.busy = false; wechatForm.toast = '';
       clearTimeout(wechatToastTimer);
       nextDraw.time = null; nextDraw.countdown = '';
@@ -416,12 +460,14 @@ createApp({
           loadWechat().catch(() => {});
           loadRecentDraws().catch(() => {});
           startCountdown().catch(() => {});
+          loadNotifications().catch(() => {});
         } else if (current.role === 'manager') {
           const values = await Promise.all(['clients', 'orders', 'bills', 'summary', 'reconciliations'].map(resource => api(`/api/stores/${current.storeId}/${resource}`)));
           if (request !== scopeRequest) return;
           [clients.value, orders.value, bills.value, summary.value, ledger.value] = values;
           orders.value = newest(orders.value); bills.value = [...bills.value].sort((a, b) => b.date.localeCompare(a.date)); ledger.value = latestLedger(ledger.value);
           loadWechat().catch(() => {});
+          loadNotifications().catch(() => {});
         } else {
           const query = hqDate.value ? `?date=${encodeURIComponent(hqDate.value)}` : '';
           const [attribution, entries, hqOrders, referralStatsRows] = await Promise.all([
@@ -1190,6 +1236,6 @@ createApp({
       }
       initialize();
     });
-    return { view, bootstrap, session, authChecking, authBusy, authError, logoutUnconfirmed, loginForm, registerForm, registerMode, referral, referralError, referralToast, qrCanvas, photoDialog, photoFileInput, photoViewing, watermarked, role, roleTitle, roleLabel, manager, store, client, ownClients, portfolio, calendar, clients, orders, bills, ledger, audits, attributionSummary, attributionTotals, referralStats, summary, storedCount, loading, scopeLoading, error, scopeError, formError, failedForm, pending, toast, day, dayDialog, orderDialog, followDialog, customDialog, codeHistoryDialog, portfolioDialog, followForm, followTotalCost, customForm, customQuantity, customSelectedCode, customTotalCost, customGroupType, customFormCard, recentRepeatHint, recentDraws, pickFilters, wechatForm, loadWechat, saveWechat, copyWechat, pickFilterMsg, smartRandomCode, luckyList, luckyBusy, saveLuckyCode, removeLuckyCode, fillFromLucky, trendsPanel, toggleTrendsPanel, switchTrendsWindow, codeHistoryView, lookupCodeHistory, nextDraw, toggleBall, selectAllBalls, clearBalls, setCustomMode, formatOrderCode, orderModeTag, isEditingPortfolio, orderForm, adjustmentForm, adjustmentUnconfirmed, adjustmentClient, adjustmentBalance, adjustmentInvalid, startAdjustment, resultForm, portfolioForm, storeForm, managerForm, clientForm, management, hqDate, title, hitCount, verifiedCount, calendarPadding, billMap, money, shortDate, dateTime, clientName, managerName, storeName, statusLabel, voucherLabel, syncing, syncMsg, syncOfficialLottery, initialize, login, register, copyReferralLink, recordReferralShare, photoUrl, pickPhoto, onPhotoPicked, openPhoto, logout, loadScope, loadGlobal, openDay, openOrder, openFollow, submitFollowOrder, openCustomOrder, randomCustomCode, submitCustomOrder, getOrderResolution, openPortfolioDialog, editPortfolioToday, savePortfolioModal, openManagement, closeOrder, saveOrder, claimVoucher, saveAdjustment, saveResolution, savePortfolio, saveStore, saveManager, saveClient, switchView, syncHash };
+    return { view, bootstrap, session, authChecking, authBusy, authError, logoutUnconfirmed, loginForm, registerForm, registerMode, referral, referralError, referralToast, qrCanvas, photoDialog, photoFileInput, photoViewing, watermarked, role, roleTitle, roleLabel, manager, store, client, ownClients, portfolio, calendar, clients, orders, bills, ledger, audits, attributionSummary, attributionTotals, referralStats, summary, storedCount, loading, scopeLoading, error, scopeError, formError, failedForm, pending, toast, day, dayDialog, orderDialog, followDialog, customDialog, codeHistoryDialog, portfolioDialog, followForm, followTotalCost, customForm, customQuantity, customSelectedCode, customTotalCost, customGroupType, customFormCard, recentRepeatHint, recentDraws, pickFilters, wechatForm, loadWechat, saveWechat, copyWechat, pickFilterMsg, smartRandomCode, luckyList, luckyBusy, saveLuckyCode, removeLuckyCode, fillFromLucky, trendsPanel, toggleTrendsPanel, switchTrendsWindow, codeHistoryView, lookupCodeHistory, nextDraw, notifications, toggleNotifications, markAllNotificationsRead, notificationIcon, notificationText, loadNotifications, toggleBall, selectAllBalls, clearBalls, setCustomMode, formatOrderCode, orderModeTag, isEditingPortfolio, orderForm, adjustmentForm, adjustmentUnconfirmed, adjustmentClient, adjustmentBalance, adjustmentInvalid, startAdjustment, resultForm, portfolioForm, storeForm, managerForm, clientForm, management, hqDate, title, hitCount, verifiedCount, calendarPadding, billMap, money, shortDate, dateTime, clientName, managerName, storeName, statusLabel, voucherLabel, syncing, syncMsg, syncOfficialLottery, initialize, login, register, copyReferralLink, recordReferralShare, photoUrl, pickPhoto, onPhotoPicked, openPhoto, logout, loadScope, loadGlobal, openDay, openOrder, openFollow, submitFollowOrder, openCustomOrder, randomCustomCode, submitCustomOrder, getOrderResolution, openPortfolioDialog, editPortfolioToday, savePortfolioModal, openManagement, closeOrder, saveOrder, claimVoucher, saveAdjustment, saveResolution, savePortfolio, saveStore, saveManager, saveClient, switchView, syncHash };
   },
 }).mount('#app');

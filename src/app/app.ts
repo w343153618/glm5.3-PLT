@@ -14,6 +14,7 @@ import { createStoreModule } from '../modules/store/index.ts';
 import { createStrategyModule } from '../modules/strategy/index.ts';
 import { createDrawStatsModule } from '../modules/draw-stats/index.ts';
 import { createLuckyModule } from '../modules/lucky/index.ts';
+import { createNotifyModule, type SettlementBillLike } from '../modules/notify/index.ts';
 import { fetchNextDrawTime } from '../modules/lottery-crawler/index.ts';
 import { createRegistryModule } from '../modules/registry/index.ts';
 import { seedDemo } from './seed.ts';
@@ -63,6 +64,8 @@ const rolePolicies = new Map<string, readonly Actor['role'][]>([
   ['GET /api/wechat/me', ['client', 'manager']],
   ['PUT /api/wechat/me', ['client', 'manager']],
   ['GET /api/wechat/manager', ['client']],
+  ['GET /api/notifications', ['client', 'manager']],
+  ['POST /api/notifications/read', ['client', 'manager']],
 ]);
 const publicRoutes = new Set(['GET /api/health', 'POST /api/auth/login', 'POST /api/auth/logout', 'POST /api/auth/register', 'GET /api/referrals/code/:code']);
 
@@ -92,6 +95,7 @@ export async function buildApp(options: AppOptions = {}) {
   const referral = createReferralModule(db);
   const drawStats = createDrawStatsModule(strategy);
   const lucky = createLuckyModule(db);
+  const notify = createNotifyModule(db);
   let access: Awaited<ReturnType<typeof createAccess>>;
   try {
     if (options.seed !== false) seedDemo(db, stores, strategy, registry, currentDate());
@@ -241,6 +245,22 @@ export async function buildApp(options: AppOptions = {}) {
     return { ok: true };
   });
 
+  // draw-notify：应用内消息中心（client 只见本人结算消息；manager 只见本人汇总）
+  app.get('/api/notifications', async (request) => {
+    const actor = access.actor(request);
+    if (actor.role === 'client' && actor.clientId) return notify.listFor('client', actor.clientId);
+    if (actor.role === 'manager' && actor.managerId) return notify.listFor('manager', actor.managerId);
+    throw new DomainError('仅客户或店长可查看消息', 403);
+  });
+  app.post('/api/notifications/read', async (request) => {
+    const actor = access.actor(request);
+    const body = (request.body ?? {}) as { ids?: string[]; all?: boolean };
+    if (actor.role === 'client' && actor.clientId) notify.markRead('client', actor.clientId, body);
+    else if (actor.role === 'manager' && actor.managerId) notify.markRead('manager', actor.managerId, body);
+    else throw new DomainError('仅客户或店长可标记已读', 403);
+    return { ok: true };
+  });
+
   // wechat-bind：本人微信号绑定/解绑（client/manager 通用，角色自适应）
   app.get('/api/wechat/me', async (request) => {
     const actor = access.actor(request);
@@ -350,8 +370,22 @@ export async function buildApp(options: AppOptions = {}) {
     const registered = registry.registerOrder(managerId, { ...input, id: randomUUID(), storeId: manager.storeId, createdAt: new Date() });
     return reply.code(201).send({ ...registered.orderSlip, managerId });
   });
-  app.post('/api/resolutions', async (request) => { access.hq(request); return registry.recordResolution(request.body); });
-  app.post('/api/resolutions/auto-sync', async (request) => { access.hq(request); return syncOfficialResolutions(registry, strategy); });
+  app.post('/api/resolutions', async (request) => {
+    access.hq(request);
+    const result = registry.recordResolution(request.body);
+    emitSettlementNotifications(result);
+    return result;
+  });
+  app.post('/api/resolutions/auto-sync', async (request) => {
+    access.hq(request);
+    return syncOfficialResolutions(registry, strategy, { onSettled: settled => emitSettlementNotifications(settled) });
+  });
+  // draw-notify：结算钩子——事务提交后生成客户/店长消息（失败静默，不影响结算结果）
+  function emitSettlementNotifications(result: { resolution: { date: string }; bills: SettlementBillLike[] }): void {
+    try {
+      notify.createSettlementNotifications(result.resolution, result.bills);
+    } catch { /* 消息丢失可接受；结算已成功 */ }
+  }
   app.post('/api/portfolios', async (request, reply) => {
     access.hq(request);
     const input = StrategyPortfolioSchema.omit({ id: true, createdAt: true }).parse(request.body);

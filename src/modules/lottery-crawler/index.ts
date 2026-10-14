@@ -138,7 +138,7 @@ export interface SyncResult {
 export async function syncOfficialResolutions(
   registry: RegistryModule,
   strategy: StrategyModule,
-  options: { limit?: number; fetchImpl?: typeof fetch } = {}
+  options: { limit?: number; fetchImpl?: typeof fetch; onSettled?: (result: { resolution: { date: string }; bills: import('../notify/index.ts').SettlementBillLike[] }) => void } = {}
 ): Promise<SyncResult> {
   const draws = await fetchOfficialDraws(options.limit ?? 30, options.fetchImpl);
   const result: SyncResult = { synced: [], skipped: [], errors: [] };
@@ -150,11 +150,14 @@ export async function syncOfficialResolutions(
       continue;
     }
     try {
-      registry.recordResolution({
+      const settled = registry.recordResolution({
         date: draw.date,
         settlementCode: draw.code,
         quotaPerUnit: draw.quotaPerUnit,
       });
+      if (options.onSettled) {
+        try { options.onSettled(settled); } catch { /* 通知失败不影响同步 */ }
+      }
       result.synced.push({ date: draw.date, code: draw.code, issue: draw.issue });
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
