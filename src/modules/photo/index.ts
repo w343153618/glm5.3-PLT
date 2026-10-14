@@ -55,12 +55,13 @@ export function createPhotoModule(baseDir: string) {
     return { token: randomBytes(32).toString('hex'), mime };
   }
 
-  /** 读取照片流。token 恒定时间比较，不匹配一律 403。 */
+  /** 读取照片流。无照片 404；token 恒定时间比较，不匹配一律 403。 */
   function read(orderId: string, token: string, expected: { token?: string; mime?: 'image/jpeg' | 'image/png' }):
     { stream: Readable; mime: 'image/jpeg' | 'image/png' } {
+    if (!expected.token || !expected.mime) throw new DomainError('该订单尚未上传票照', 404);
     const supplied = Buffer.from(String(token ?? ''), 'utf8');
-    const recorded = Buffer.from(expected.token ?? '', 'utf8');
-    if (supplied.length !== recorded.length || !timingSafeEqual(supplied, recorded) || !expected.token) {
+    const recorded = Buffer.from(expected.token, 'utf8');
+    if (supplied.length !== recorded.length || !timingSafeEqual(supplied, recorded)) {
       throw new DomainError('照片访问令牌不正确', 403);
     }
     const mime = PhotoMimeSchema.parse(expected.mime);

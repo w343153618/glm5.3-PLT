@@ -3,6 +3,7 @@ import fastifyStatic from '@fastify/static';
 import { createReadStream } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
+import { dirname } from 'node:path';
 import { z, ZodError } from 'zod';
 import { createDatabase } from '../shared/database.ts';
 import { DomainError } from '../shared/errors.ts';
@@ -14,6 +15,7 @@ import { createRegistryModule } from '../modules/registry/index.ts';
 import { seedDemo } from './seed.ts';
 import { createReconciliationModule } from '../modules/reconciliation/index.ts';
 import { createReferralModule } from '../modules/referral/index.ts';
+import { createPhotoModule } from '../modules/photo/index.ts';
 import { ReconciliationAdjustmentSchema } from '../shared/schemas/reconciliation.ts';
 import { VoucherStatusSchema } from '../shared/schemas/domain.ts';
 import { RegisterInputSchema } from '../shared/schemas/referral.ts';
@@ -45,6 +47,8 @@ const rolePolicies = new Map<string, readonly Actor['role'][]>([
   ['GET /api/referrals/me', ['client', 'manager']],
   ['POST /api/referrals/share', ['client', 'manager']],
   ['GET /api/hq/referral-stats', ['hq']],
+  ['POST /api/orders/:orderId/photo', ['manager']],
+  ['GET /api/orders/:orderId/photo', ['client', 'manager', 'hq']],
 ]);
 const publicRoutes = new Set(['GET /api/health', 'POST /api/auth/login', 'POST /api/auth/logout', 'POST /api/auth/register', 'GET /api/referrals/code/:code']);
 
@@ -66,6 +70,7 @@ export async function buildApp(options: AppOptions = {}) {
   const currentDate = () => z.iso.date().parse(options.today ?? businessDate());
   currentDate();
   const db = createDatabase(options.databasePath ?? 'data/app.db');
+  const photos = createPhotoModule(dirname(options.databasePath ?? 'data/app.db'));
   const stores = createStoreModule(db);
   const strategy = createStrategyModule(db);
   const registry = createRegistryModule(db, stores, strategy);
@@ -162,7 +167,8 @@ export async function buildApp(options: AppOptions = {}) {
   app.addHook('onSend', async (_request, reply) => {
     reply.header('X-Content-Type-Options', 'nosniff');
     reply.header('Referrer-Policy', 'same-origin');
-    reply.header('Cache-Control', 'no-store');
+    // 路由已显式设置 Cache-Control（如票照 private, no-store）时不覆盖
+    if (!reply.hasHeader('Cache-Control')) reply.header('Cache-Control', 'no-store');
     reply.header('X-Frame-Options', 'DENY');
   });
 
@@ -392,6 +398,41 @@ export async function buildApp(options: AppOptions = {}) {
     const managerId = access.manager(request);
     const record = registry.updateVoucherStatus(managerId, orderId, voucherStatus);
     return { ...record.orderSlip, managerId: record.managerId };
+  });
+  // ---- 票照上传与查看（ticket-photo）----
+  const photoUploadBody = z.strictObject({ photoBase64: z.string().min(1).max(8 * 1024 * 1024) });
+  app.post<{ Params: { orderId: string } }>('/api/orders/:orderId/photo', {
+    // 该路由单独放宽 body 限制：7MB（base64 膨胀后覆盖 5MB 原图），其余路由维持 32KB
+    bodyLimit: 7 * 1024 * 1024,
+  }, async (request, reply) => {
+    const { orderId } = z.strictObject({ orderId: z.uuid() }).parse(request.params);
+    const input = photoUploadBody.parse(request.body);
+    const actor = access.actor(request);
+    if (actor.role !== 'manager' || !actor.managerId) throw new DomainError('仅归属店长可上传票照', 403);
+    const record = registry.getOrder(orderId);
+    if (!record) throw new DomainError('订单不存在', 404);
+    if (record.managerId !== actor.managerId) throw new DomainError('只能为名下订单上传票照', 403);
+    const stored = photos.save(orderId, input);
+    const updated = registry.attachPhoto(orderId, actor.managerId, stored);
+    return reply.code(201).send({ ...updated.orderSlip, managerId: updated.managerId });
+  });
+  app.get<{ Params: { orderId: string } }>('/api/orders/:orderId/photo', async (request, reply) => {
+    const { orderId } = z.strictObject({ orderId: z.uuid() }).parse(request.params);
+    const token = z.string().min(1).max(128).parse((request.query as Record<string, string | undefined>).token);
+    const actor = access.actor(request);
+    const record = registry.getOrder(orderId);
+    if (!record) throw new DomainError('订单不存在', 404);
+    // 角色归属校验：client 仅本人、manager 仅名下、hq 全部可见
+    if (actor.role === 'client' && record.orderSlip.clientId !== actor.clientId) throw new DomainError('只能查看本人订单票照', 403);
+    if (actor.role === 'manager' && record.managerId !== actor.managerId) throw new DomainError('只能查看名下订单票照', 403);
+    const { stream, mime } = photos.read(orderId, token, {
+      ...(record.orderSlip.photoToken !== undefined ? { token: record.orderSlip.photoToken } : {}),
+      ...(record.orderSlip.photoMime !== undefined ? { mime: record.orderSlip.photoMime } : {}),
+    });
+    reply.header('Content-Type', mime);
+    reply.header('Cache-Control', 'private, no-store');
+    reply.header('X-Content-Type-Options', 'nosniff');
+    return reply.send(stream);
   });
   const auditQuery = z.strictObject({ date: z.iso.date().optional(), managerId: z.uuid().optional(), storeId: z.uuid().optional() });
   app.get('/api/hq/attribution-audits', async request => {

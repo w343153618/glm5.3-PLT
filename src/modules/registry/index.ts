@@ -132,6 +132,24 @@ export function createRegistryModule(db: AppDatabase, stores: StoreModule, strat
       return allOrders().filter((registered) => registered.orderSlip.storeId === storeId
         && (managerId === undefined || registered.managerId === managerId));
     },
+    /** 供票照路由读取单笔订单（含归属校验所需 managerId）。 */
+    getOrder(orderId: string): RegisteredOrder | undefined {
+      const value = db.get('registration', orderId);
+      return value === undefined ? undefined : RegisteredOrderSchema.parse(value);
+    },
+    /** 票照落盘后写入订单记录（token/mime），归属校验由调用方完成后传入 managerId 复核。 */
+    attachPhoto(orderId: string, managerId: string, stored: { token: string; mime: 'image/jpeg' | 'image/png' }): RegisteredOrder {
+      z.uuid().parse(orderId); z.uuid().parse(managerId);
+      return db.transaction(() => {
+        const value = db.get('registration', orderId);
+        if (value === undefined) throw new DomainError('历史存根不存在', 404);
+        const record = RegisteredOrderSchema.parse(value);
+        if (record.managerId !== managerId) throw new DomainError('仅归属店长可更新票照', 403);
+        const updated = { ...record, orderSlip: { ...record.orderSlip, photoToken: stored.token, photoMime: stored.mime } };
+        db.set('registration', orderId, updated);
+        return updated;
+      });
+    },
     listAllOrders(filters?: { storeId?: string | undefined; managerId?: string | undefined; date?: string | undefined; clientId?: string | undefined }): RegisteredOrder[] {
       return allOrders().filter(({ orderSlip, managerId }) => {
         if (filters?.storeId && orderSlip.storeId !== filters.storeId) return false;
