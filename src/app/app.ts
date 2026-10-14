@@ -1,6 +1,7 @@
 import Fastify from 'fastify';
 import fastifyStatic from '@fastify/static';
-import { createReadStream } from 'node:fs';
+import { createReadStream, readFileSync } from 'node:fs';
+import { stripTypeScriptTypes } from 'node:module';
 import { randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { dirname } from 'node:path';
@@ -454,6 +455,13 @@ export async function buildApp(options: AppOptions = {}) {
   await app.register(fastifyStatic, { root: fileURLToPath(new URL('./client/', import.meta.url)), index: 'index.html' });
   app.get('/vendor/vue.esm-browser.prod.js', async (_request, reply) => {
     return reply.type('application/javascript; charset=utf-8').send(createReadStream(fileURLToPath(new URL('../../node_modules/vue/dist/vue.esm-browser.prod.js', import.meta.url))));
+  });
+  // /qr.ts 是 ES module import 的 TypeScript 源文件。静态服务按扩展名 .ts 会以
+  // video/mp2t 下发，浏览器拒绝执行导致页面空白。这里用 Node 26 内置类型剥离
+  // 转成合法 JS 再下发（与上方 vendor 路由同款模式，零构建步骤、零新依赖）。
+  app.get('/qr.ts', async (_request, reply) => {
+    const source = readFileSync(fileURLToPath(new URL('./client/qr.ts', import.meta.url)), 'utf8');
+    return reply.type('application/javascript; charset=utf-8').send(stripTypeScriptTypes(source));
   });
   return app;
 }
