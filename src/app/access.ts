@@ -1,10 +1,11 @@
-import { randomBytes, scrypt, timingSafeEqual, createHash } from 'node:crypto';
+import { randomBytes, randomUUID, scrypt, timingSafeEqual, createHash } from 'node:crypto';
 import { promisify } from 'node:util';
 import { z } from 'zod';
 import type { FastifyRequest, FastifyReply } from 'fastify';
 import type { StoreModule } from '../modules/store/index.ts';
 import type { AppDatabase } from '../shared/database.ts';
 import { DomainError } from '../shared/errors.ts';
+import { RegisterInputSchema } from '../shared/schemas/referral.ts';
 import { initialCredentials } from './initial-credentials.ts';
 
 const derive = promisify(scrypt);
@@ -101,6 +102,39 @@ export async function createAccess(db: AppDatabase, stores: StoreModule, options
       const previous = token(request);
       if (previous) sessions.delete(digest(previous));
       for (const [key, value] of sessions) if (value.expires <= Date.now()) sessions.delete(key);
+      if (sessions.size >= 500) throw new DomainError('当前会话过多，请稍后重试', 503);
+      const id = randomBytes(32).toString('base64url');
+      sessions.set(digest(id), { username: account.username, expires: Date.now() + lifetime });
+      reply.header('Set-Cookie', cookie(id, lifetime / 1000));
+      return selected;
+    },
+    /** 扫码自助注册：解码推广码→建客户档案（归属该店长）→建账号→签发会话。 */
+    async register(
+      request: FastifyRequest,
+      reply: FastifyReply,
+      input: { refCode: string; username: string; password: string; name: string },
+      resolveCode: (code: string) => { managerId: string },
+      businessDateOf: () => string,
+    ): Promise<Actor> {
+      const parsed = RegisterInputSchema.safeParse(input);
+      if (!parsed.success) throw new DomainError('注册信息格式不正确（用户名 3-30 位字母数字，密码至少 8 位）', 400);
+      limit(`ip:${request.ip}`, 10, reply);
+      limit(`register:${request.ip}`, 5, reply);
+      if (db.get('auth_account', input.username)) throw new DomainError('用户名已被使用，请换一个', 409);
+      const { managerId } = resolveCode(input.refCode);
+      const manager = stores.getManager(managerId);
+      if (!manager) throw new DomainError('推广码无效，请联系店长重新分享', 400);
+      const salt = randomBytes(16).toString('hex');
+      const hash = (await derive(input.password, salt, 64) as Buffer).toString('hex');
+      const client = stores.addClient({
+        id: randomUUID(), storeId: manager.storeId, managerId: manager.id,
+        name: input.name, date: businessDateOf(), note: '扫码注册',
+      });
+      const account: Account = { username: input.username, role: 'Client', subjectId: client.id, salt, hash };
+      db.insert('auth_account', input.username, account);
+      const selected = resolve(account);
+      const previous = token(request);
+      if (previous) sessions.delete(digest(previous));
       if (sessions.size >= 500) throw new DomainError('当前会话过多，请稍后重试', 503);
       const id = randomBytes(32).toString('base64url');
       sessions.set(digest(id), { username: account.username, expires: Date.now() + lifetime });

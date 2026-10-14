@@ -4,6 +4,8 @@ import { createDatabase } from '../src/shared/database.ts';
 import { DomainError } from '../src/shared/errors.ts';
 import { createStoreModule } from '../src/modules/store/index.ts';
 import { createReferralModule, encodeReferralCode, decodeReferralCode } from '../src/modules/referral/index.ts';
+import { createAccess } from '../src/app/access.ts';
+import type { FastifyRequest, FastifyReply } from 'fastify';
 
 function fixture() {
   const db = createDatabase(':memory:');
@@ -12,6 +14,18 @@ function fixture() {
   const store = stores.addStore({ id: randomUUID(), name: '门店 1' });
   const manager = stores.addManager({ id: randomUUID(), storeId: store.id, name: '店长 1' });
   return { db, stores, referral, store, manager };
+}
+
+/** access 层测试用：轻量 request/reply 桩。 */
+function stubRequestResponse(ip = '203.0.113.10') {
+  const headers: Record<string, string | number | undefined> = {};
+  const request = { ip, headers: { cookie: undefined }, get header() { return undefined; } } as unknown as FastifyRequest;
+  const headerCalls: Array<[string, string]> = [];
+  const reply = {
+    headerCalls,
+    header(name: string, value: string) { headerCalls.push([name, value]); return this as unknown as FastifyReply; },
+  } as unknown as FastifyReply & { headerCalls: Array<[string, string]> };
+  return { request, reply };
 }
 
 describe('referral code codec', () => {
@@ -93,5 +107,69 @@ describe('share events and stats', () => {
     const { referral, stores, manager } = fixture();
     stores.addClient({ id: randomUUID(), storeId: manager.storeId, managerId: manager.id, name: '线下客户', date: '2026-10-14' });
     expect(referral.stats()).toHaveLength(0);
+  });
+});
+
+describe('access.register()', () => {
+  async function accessFixture() {
+    const f = fixture();
+    const access = await createAccess(f.db, f.stores, {});
+    const { request, reply } = stubRequestResponse();
+    const register = (input: { refCode: string; username: string; password: string; name?: string }) =>
+      access.register(request, reply, { name: input.name ?? input.username, ...input }, f.referral.resolveCode, () => '2026-10-14');
+    return { ...f, access, register, reply };
+  }
+
+  it('creates a client attributed to the referral manager, an account, and a session', async () => {
+    const { referral, manager, stores, register, reply } = await accessFixture();
+    const refCode = referral.getOrCreateCode(manager.id);
+    const actor = await register({ refCode, username: 'newbie1', password: 'Abcd1234', name: '王先生' });
+    expect(actor).toMatchObject({ role: 'client', username: 'newbie1', storeId: manager.storeId, managerId: manager.id });
+    const client = stores.listClients(manager.storeId).find((row) => row.name === '王先生');
+    expect(client).toMatchObject({ managerId: manager.id, storeId: manager.storeId, reconciliationBalance: 0 });
+    expect(reply.headerCalls[0]![0]).toBe('Set-Cookie');
+    expect(String(reply.headerCalls[0]![1])).toContain('app_session=');
+  });
+
+  it('rejects a duplicate username with 409', async () => {
+    const { referral, manager, register } = await accessFixture();
+    const refCode = referral.getOrCreateCode(manager.id);
+    await register({ refCode, username: 'newbie2', password: 'Abcd1234' });
+    await expect(register({ refCode, username: 'newbie2', password: 'Abcd1234' })).rejects.toMatchObject({ statusCode: 409 });
+  });
+
+  it('rejects an invalid referral code with 400', async () => {
+    const { register } = await accessFixture();
+    await expect(register({ refCode: 'invalid-code', username: 'newbie3', password: 'Abcd1234' })).rejects.toMatchObject({ statusCode: 400 });
+  });
+
+  it('rejects a valid-format code for a non-existent manager with 400', async () => {
+    const { register } = await accessFixture();
+    const ghostCode = encodeReferralCode(randomUUID());
+    await expect(register({ refCode: ghostCode, username: 'newbie4', password: 'Abcd1234' })).rejects.toMatchObject({ statusCode: 400 });
+  });
+
+  it('rejects a short password', async () => {
+    const { referral, manager, register } = await accessFixture();
+    const refCode = referral.getOrCreateCode(manager.id);
+    await expect(register({ refCode, username: 'newbie5', password: 'short' })).rejects.toThrow();
+  });
+
+  it('writes a scan-register attribution audit visible to hq stats', async () => {
+    const { referral, manager, register } = await accessFixture();
+    const refCode = referral.getOrCreateCode(manager.id);
+    await register({ refCode, username: 'newbie6', password: 'Abcd1234' });
+    const rows = referral.stats();
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ managerId: manager.id, date: '2026-10-14', registerCount: 1, shareCount: 0 });
+  });
+
+  it('rate-limits registration attempts per IP', async () => {
+    const { referral, manager, register } = await accessFixture();
+    const refCode = referral.getOrCreateCode(manager.id);
+    for (let index = 0; index < 5; index += 1) {
+      await register({ refCode, username: `rate${index}`, password: 'Abcd1234' });
+    }
+    await expect(register({ refCode, username: 'rate6', password: 'Abcd1234' })).rejects.toMatchObject({ statusCode: 429 });
   });
 });
